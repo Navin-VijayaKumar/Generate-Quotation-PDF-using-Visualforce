@@ -1,0 +1,173 @@
+<apex:page standardController="Quote" renderAs="pdf" applyBodyTag="false">
+<html>
+<head>
+<style>
+@page {
+    size: A4;
+    margin: 15mm 15mm 15mm 15mm;
+}
+body {
+    font-family: Arial, sans-serif;
+    font-size: 10.15px;
+    font-weight: normal;
+    margin: 0;
+    padding: 0;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ HEADER: Logo top-right + Company name top-left ═══ -->
+
+
+<!-- ═══ TITLE ═══ -->
+<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:12px;">
+<table cellpadding="0" cellspacing="0" width="100%">
+    <tr>
+        
+        <td style="text-align:right; vertical-align:top; padding:2px;">
+            <img src="{!URLFOR($Resource.pfdLogo)}" height="100"/>
+        </td>
+          <tr>
+        <td style=" width:100%; dispaly:flex; align-item:center; text-align:center;  font-size:13px; padding:3px;">
+            Quotation
+        </td>
+    </tr>
+    </tr>
+</table>
+  
+</table>
+
+<!-- ═══ REF + DATE ═══ -->
+<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:10px;">
+    <tr>
+        <td style="width:50%; padding:2px; vertical-align:top;     font-weight: normal;">
+            Ref No.: {!Quote.Name}
+        </td>
+        <td style="text-align:right; padding:2px; vertical-align:top;">
+            Date :
+            <apex:outputText value="{0,date,MMMM dd, yyyy}">
+                <apex:param value="{!Quote.CreatedDate}"/>
+            </apex:outputText>
+        </td>
+    </tr>
+</table>
+
+<!-- ═══ TO / CUSTOMER INFO ═══ -->
+<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:14px;">
+<td style="vertical-align:top; width:60%; font-size:10.15px;  line-height:1.6; padding:2px;">
+        </td>
+    <tr>
+        <td style="padding:2px; line-height:1; vertical-align:top;">
+            To,<br/>
+            <span>{!Quote.ShippingName}</span><br/>
+            {!Quote.ShippingStreet}<br/>
+            {!Quote.ShippingCity}, {!Quote.ShippingState} - {!Quote.ShippingPostalCode}<br/>
+            {!Quote.ShippingCountry}
+        </td>
+    </tr>
+</table>
+
+<!-- ═══ KINR ATTENTION ═══ -->
+<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:12px;">
+    <tr>
+        <td style="padding:2px; line-height:1.8;">
+            <span>Kind Attention :</span> Mr. {!Quote.Contact.Name}
+        </td>
+    </tr>
+</table>
+
+<!-- ═══ DEAR SIR ═══ -->
+<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:10px;">
+    <tr>
+        <td style="padding:2px; line-height:1;">
+            Dear Sir,<br/>
+            Please fINR attached our offer as below; hope it is in line with your requirement:
+        </td>
+    </tr>
+</table>
+
+<!-- ═══ PRODUCT TABLE ═══ -->
+<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:10px; border-collapse:collapse;">
+
+    <tr>
+        <td width="6%"  style="padding:6px 4px; text-align:center;  border:0.15px solid #000; background:#f2f2f2;">SR.<br/>NO.</td>
+        <td width="18%" style="padding:6px 4px; text-align:center;  border:0.15px solid #000; background:#f2f2f2;">PRODUCT CODE</td>
+        <td width="40%" style="padding:6px 4px; text-align:center;  border:0.15px solid #000; background:#f2f2f2;">DESCRIPTION</td>
+        <td width="8%"  style="padding:6px 4px; text-align:center;  border:0.15px solid #000; background:#f2f2f2;">QTY</td>
+        <td width="14%" style="padding:6px 4px; text-align:center;  border:0.15px solid #000; background:#f2f2f2;">UNIT RATE</td>
+        <td width="14%" style="padding:6px 4px; text-align:center; border:0.15px solid #000; background:#f2f2f2;">TOTAL</td>
+    </tr>
+
+    <apex:variable var="i" value="{!1}"/>
+
+    <apex:repeat value="{!Quote.QuoteLineItems}" var="q">
+        <tr>
+            <td style="padding:6px 4px; text-align:center; border:0.15px solid #000;">{!i}</td>
+            <td style="padding:6px 4px; text-align:center; border:0.15px solid #000;">{!q.Product2.ProductCode}</td>
+            <td style="padding:6px 4px; border:0.15px solid #000;">
+                {!IF(q.Description != null, q.Description, q.Product2.Name)}
+            </td>
+            <td style="padding:6px 4px; text-align:center; border:0.15px solid #000;">{!q.Quantity}</td>
+            <td style="padding:6px 4px; text-align:right; border:0.15px solid #000;">{!q.UnitPrice}</td>
+            <td style="padding:6px 4px; text-align:right; border:0.15px solid #000;">{!q.TotalPrice}</td>
+        </tr>
+        <apex:variable var="i" value="{!i+1}"/>
+    </apex:repeat>
+
+</table>
+<!-- ═══ TOTALS BOX (right aligned) ═══ -->
+<table cellpadding="0" cellspacing="0"
+       style="margin-top:6px; margin-left:auto; width:260px; border-collapse:collapse;">
+    <tr>
+        <td style="padding:5px 8px; width:55%;
+                   border-top:0.15px solid #000000; border-bottom:0.15px solid #000000;
+                   border-left:0.15px solid #000000; border-right:0.15px solid #000000;">
+            Total Basic (INR)
+        </td>
+        <td style="padding:5px 8px; text-align:right; width:45%;
+                   border-top:0.15px solid #000000; border-bottom:0.15px solid #000000;
+                   border-left:0.15px solid #000000; border-right:0.15px solid #000000;">
+            {!Quote.Subtotal}
+        </td>
+    </tr>
+    <tr>
+        <td style="padding:5px 8px;
+                   border-top:0.15px solid #000000; border-bottom:0.15px solid #000000;
+                   border-left:0.15px solid #000000; border-right:0.15px solid #000000;">
+            Total (INR)
+        </td>
+        <td style="padding:5px 8px; text-align:right;
+                   border-top:0.15px solid #000000; border-bottom:0.15px solid #000000;
+                   border-left:0.15px solid #000000; border-right:0.15px solid #000000;">
+            {!Quote.GrandTotal} 
+        </td>
+    </tr>
+</table>
+
+<!-- ═══ SIGNATURE BLOCK ═══ -->
+<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:30px;">
+    <tr>
+        <td style="padding:2px; line-height:1.9; font-size:14px; font-weight: normal; vertical-align:top;">
+            For {!Quote.Account.Name}<br/><br/>
+            <span>{!Quote.Owner.Name}</span><br/>
+            &#160;<br/>
+            Mob: {!Quote.Owner.Phone} | Email: {!Quote.Owner.Email}
+        </td>
+    </tr>
+</table>
+
+<!-- ═══ BOTTOM COMPANY STAMP ═══ -->
+<table cellpadding="0" cellspacing="0" width="100%" style="margin-top:40px; font-weight: normal;">
+    <tr>
+        <td style="text-align:center; font-size:10px; color:#555555;
+                   border-top:0.15px solid #cccccc; padding-top:5px; line-height:1.7;">
+            MIDMARK (INRIA) PRIVATE LIMITED<br/>
+            Formerly "JANAK HEALTHCARE PRIVATE LIMITED"
+        </td>
+    </tr>
+</table>
+
+</body>
+</html>
+</apex:page>

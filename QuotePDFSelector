@@ -1,0 +1,133 @@
+<apex:page standardController="Quote">
+
+<style>
+body {
+    margin: 0;
+    font-family: "Salesforce Sans", Arial, sans-serif;
+    background: #f3f2f2;
+}
+
+.wrapper {
+    display: flex;
+    height: 100vh;
+}
+
+/* LFT SIDEBAR */
+.sidebar {
+    width: 260px;
+    background: #f3f2f2;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+   display:flex;
+   flex-direction:column;
+    width: 200px;
+    background: #ffffff;
+    gap:15px;
+    padding-bottom:10px;
+    font-size:16px;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+/* TITLE */
+.title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.btn {
+    width: 100%;
+    padding: 10px;
+    height:30px;
+    margin: 10px 0;
+    display:flex;
+    background:  #f3f2f2;
+    border-radius: 6px;
+    align-items:center;
+    justify-content:center;
+    text-align: center;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: none;
+    background-image: none;
+    appearance: none;
+    border:none;
+    background-color: #f3f2f2 !important;
+    background-image: none !important;
+}
+
+.btn:hover {
+    background:  #ffffff;
+}
+
+.back {
+    background:  #ffffff;
+    
+}
+
+.back:hover {
+    background:  #ffffff;
+}
+
+.viewer {
+    flex: 1;
+    background: #FFFFFF;
+}
+
+iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+</style>
+
+<script>
+function loadPDF(type) {
+    var iframe = document.getElementById('pdfFrame');
+    var recordId = '{!Quote.Id}';
+
+    if(type === 'format1'){
+        iframe.src = '/apex/QuotePDFFormat1?id=' + recordId;
+    }
+    else if(type === 'format2'){
+        iframe.src = '/apex/QuotePDFFormat2?id=' + recordId;
+    }
+}
+</script>
+
+<div class="wrapper">
+
+    <!-- LEFT SIDE -->
+    <div class="sidebar">
+    
+    <div class="container">
+        <div class="title">Select Quote PDF</div>
+
+        <div class="btn" onclick="loadPDF('format1')">
+            Quote Format 1
+        </div>
+
+        <div class="btn" onclick="loadPDF('format2')">
+            Quote Format 2
+        </div>
+
+        <div class="btn back" style="background:#fae1e1 !important;" onclick="window.history.back()">
+            Go Back
+        </div>
+        </div>
+    </div>
+
+    <div class="viewer">
+        <iframe id="pdfFrame"></iframe>
+    </div>
+
+</div>
+
+</apex:page>

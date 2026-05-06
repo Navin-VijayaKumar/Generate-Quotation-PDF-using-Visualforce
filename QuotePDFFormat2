@@ -1,0 +1,302 @@
+<apex:page standardController="Quote" renderAs="pdf" applyBodyTag="false">
+<html>
+<head>
+<style>
+@page {
+    size: A4;
+    margin: 10mm;
+}
+body {
+    font-family:sans-serif;
+    font-size:10.50px;
+    font-weight:normal;
+    margin: 0;
+    padding: 0;
+}
+</style>
+</head>
+<body>
+
+<table cellpadding="0" cellspacing="0"
+       style="width:100%;
+              height:100%;
+              border-top:    0.50px solid #000000;
+              border-bottom: 0.50px solid #000000;
+              border-left:   0.50px solid #000000;
+              border-right:  0.50px solid #000000;">
+  <tr>
+    <td style="padding:0; vertical-align:top;">
+
+      <!-- INNER TABLE fills full height, pushes footer to bottom -->
+      <table cellpadding="0" cellspacing="0"
+             style="width:100%; height:100%;">
+
+        <!-- ══ ROW A: ALL CONTENT ══ -->
+        <tr>
+          <td style="padding:5px; vertical-align:top;">
+
+            <!-- HEADER -->
+            <table cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td width="50%" style="padding:0.50px; vertical-align:middle;">
+                  <img src="{!URLFOR($Resource.pfdLogo)}" height="140"/>
+                </td>
+                <td style="text-align:right; font-size:10.50px; font-weight:normal; padding:0.50px; vertical-align:middle;padding-bottom:10px;">
+                  MIDMARK DEMO APP
+                  <br></br>
+                   {!Quote.BillingStreet}   {!Quote.BillingCity}<br/>
+                </td>
+                      
+                
+              </tr>
+            </table>
+
+            <!-- TITLE -->
+            <table cellpadding="0" cellspacing="0" width="100%" style="margin-top:5px; border-collapse:collapse;">
+              <tr>
+                <td style="text-align:center; font-size:10.50px; font-weight:normal; padding:4px;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;">
+                  Proforma Invoice
+                </td>
+              </tr>
+            </table>
+
+            <!-- INFO TABLE -->
+            <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+              <tr>
+                <td rowspan="2" width="50%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  From: {!Quote.Account.Name}<br/>&#160;<br/>
+                  {!Quote.BillingStreet}<br/>
+                  {!Quote.BillingCity}<br/>
+                  Tel.: {!Quote.Phone}
+                </td>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Proforma Invoice No.<br/>{!Quote.Name}
+                </td>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Dated<br/>
+                  <apex:outputText value="{0,date,d-MMM-yyyy}">
+                    <apex:param value="{!Quote.CreatedDate}"/>
+                  </apex:outputText>
+                </td>
+              </tr>
+              <tr>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Supplier's Ref<br/>&#160;
+                </td>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Other Reference(s)<br/>&#160;
+                </td>
+              </tr>
+              <tr>
+                <td rowspan="3" width="50%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Consignee<br/>
+                  {!Quote.ShippingName}<br/>
+                  {!Quote.ShippingStreet}<br/>
+                  {!Quote.ShippingCity}<br/>
+                  {!Quote.ShippingState}<br/>
+                  {!Quote.ShippingPostalCode}<br/>
+                  {!Quote.ShippingCountry}
+                </td>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Buyer's Order No.<br/>&#160;
+                </td>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Dated<br/>&#160;
+                </td>
+              </tr>
+              <tr>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Dispatch Document No.<br/>&#160;
+                </td>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Delivery Note Date<br/>&#160;
+                </td>
+              </tr>
+              <tr>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Dispatched through<br/>&#160;
+                </td>
+                <td width="25%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Destination<br/>{!Quote.ShippingCity}
+                </td>
+              </tr>
+              <tr>
+                <td width="50%"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  Buyer (if other than consignee)<br/>
+                  {!Quote.BillingName}<br/>
+                  Contact :<br/>
+                  {!Quote.Phone}
+                </td>
+                <td colspan="2"
+                    style="padding:5px; vertical-align:top;
+                           border-top:0.50px solid #000000; border-bottom:0.50px solid #000000;
+                           border-left:0.50px solid #000000; border-right:0.50px solid #000000;
+                           font-size:10.50px; font-weight:normal;">
+                  &#160;
+                </td>
+              </tr>
+            </table>
+
+            <!-- PRODUCT TABLE -->
+            <table cellpadding="0" cellspacing="0" width="100%" style="margin-top:5px; border-collapse:collapse;">
+              <tr>
+                <td width="4%"  style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Sl No.</td>
+                <td width="22%" style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Description of Goods</td>
+                <td width="9%"  style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">HSN/SAC</td>
+                <td width="9%"  style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Barcode</td>
+                <td width="7%"  style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Quantity</td>
+                <td width="7%"  style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Rate</td>
+                <td width="6%"  style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Per</td>
+                <td width="7%"  style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Disc. %</td>
+                <td width="10%" style="padding:4px 0.50px; text-align:left; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;padding-left:5px;">Disc. Amount</td>
+                <td width="10%" style="padding:4px 0.50px; text-align:left; font-size:10.50px; font-weight:normal; background-color:#e6e6e6; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;padding-left:5px;">Total Amount</td>
+              </tr>
+              <apex:variable var="i" value="{!1}"/>
+              <apex:repeat value="{!Quote.QuoteLineItems}" var="q">
+              <tr>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">{!i}</td>
+                <td style="padding:4px 0.50px; text-align:left;   font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000; padding-left:5px;">{!q.Product2.Name}</td>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">{!q.Product2.ProductCode}</td>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">BAR123</td>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">{!q.Quantity}</td>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">{!q.UnitPrice}</td>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">KGS</td>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">{!q.Discount}</td>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">
+                  <apex:outputText value="{0,number,#,##0.00}">
+                    <apex:param value="{!q.UnitPrice * q.Quantity * (q.Discount / 100)}"/>
+                  </apex:outputText>
+                </td>
+                <td style="padding:4px 0.50px; text-align:center; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">{!q.TotalPrice}</td>
+              </tr>
+              <apex:variable var="i" value="{!i+1}"/>
+              </apex:repeat>
+              <tr>
+                <td colspan="9" style="padding:4px 5px; text-align:right; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Total (INR)</td>
+                <td style="padding:4px 0.50px; text-align:right; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000; padding-right:5px;">{!Quote.TotalPrice}</td>
+              </tr>
+              <tr>
+                <td colspan="9" style="padding:4px 5px; text-align:right; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">IGST&#160;&#160;18% (INR)</td>
+                <td style="padding:4px 0.50px; text-align:right; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000; padding-right:5px;">
+                  <apex:outputText value="{0,number,#,##0}">
+                    <apex:param value="{!Quote.GrandTotal - Quote.TotalPrice}"/>
+                  </apex:outputText>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="9" style="padding:4px 5px ; text-align:right; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000;">Grand Total (INR)</td>
+                <td style="padding:4px 0.50px; text-align:right; font-size:10.50px; font-weight:normal; border-top:0.50px solid #000000; border-bottom:0.50px solid #000000; border-left:0.50px solid #000000; border-right:0.50px solid #000000; padding-right:5px;">{!Quote.GrandTotal}</td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
+        <!-- ══ ROW B: FILLER — stretches to consume remaining space ══ -->
+        <tr style="height:100%;">
+          <td style="height:100%; line-height:0; font-size:0;">&#160;</td>
+        </tr>
+
+        <!-- ══ ROW C: FOOTER — pushed to bottom by filler row ══ -->
+        <tr>
+          <td style="padding:5px 6px; vertical-align:top;
+                     border-top:0.50px solid #000000; margin-top:100px !important; padding-top:100px;">
+            <table cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td width="55%" style="vertical-align:top; padding:0.50px 4px;
+                                       font-size:10.50px; font-weight:normal; line-height:1.9;">
+                  Company's Bank Details<br/>
+                  Bank Name : STATE BANK OF INRIA<br/>
+                  A/C No. : XXXXXXXXXX<br/>
+                  Branch &amp; IFS Code : Khargapur &amp; SBIN0006969<br/>
+                  Remarks :<br/>
+                  Proforma Invoice No. : {!Quote.Name}
+                </td>
+                <td width="45%" style="vertical-align:top; padding:0.50px 4px;">
+                  <table cellpadding="0" cellspacing="0" width="100%"
+                         style="border-top:0.50px solid #000000;
+                                border-bottom:0.50px solid #000000;
+                                border-left:0.50px solid #000000;
+                                border-right:0.50px solid #000000;">
+                    <tr>
+                      <td style="text-align:right; padding:5px 7px 0 7px; font-size:10.50px; font-weight:normal;">
+                        for MIDMARK PVT LTD
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="text-align:right; padding:18px 7px 5px 7px; font-size:10.50px; font-weight:normal;">
+                        Authorised Signatory
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>                                                   
+          </td>
+        </tr>
+
+      </table>
+      <!-- END INNER TABLE -->
+
+    </td>
+  </tr>
+</table>
+<!-- END OUTER BORDER TABLE -->
+
+</body>
+</html>
+</apex:page>

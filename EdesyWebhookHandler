@@ -1,0 +1,377 @@
+@RestResource(urlMapping='/api/call-completed')
+global without sharing class EdesyWebhookHandler {
+    
+    @HttpPost
+    global static void handleWebhook() {
+        
+        RestRequest req = RestContext.request;
+        String requestBody = req.requestBody.toString();
+        System.debug('Webhook Payload: ' + requestBody);
+        
+        try {
+            // =========================
+            // 🔹 PARSE REQUEST
+            // =========================
+            Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(requestBody);
+            
+            Boolean isLeadHandled = false;
+            Date targetDate = Date.newInstance(2026, 4, 16);
+            
+            Map<String, Object> data = (Map<String, Object>) payload.get('data');
+            
+            String phoneNumber = '';
+            String direction = (String) data.get('direction');
+            if(direction == 'outbound'){
+                phoneNumber = (String) data.get('to_number');
+            }else if(direction == 'inbound'){
+                phoneNumber = (String) data.get('from_number');
+            }
+			Integer agentid = (Integer) data.get('agent_id');
+            String callsummary = (String) data.get('call_summary');
+            String businesstype = (String)data.get('business_type');
+            Decimal callduration = (Decimal)data.get('call_duration');
+            String callprovider = (String)data.get('call_provider');
+            String callsid = (String)data.get('call_sid');
+            String callsource = (String)data.get('call_source');
+            String callpurpose = (String) data.get('call_purpose');
+            String companyname = (String) data.get('company_name_');
+            String composition = (String) data.get('composition');
+            String experience = (String) data.get('experience');
+            String market = (String) data.get('market_');
+            String orderquantity = (String) data.get('order_quantity');
+            String qualification = (String) data.get('qualification');
+            String salesproductsegment = (String) data.get('sales_product_segment_');
+            String username = (String) data.get('user_name');
+            String whatsapp = (String) data.get('whatsapp');
+            
+			String callstatus = (String) data.get('call_status');
+            String agentname = (String) data.get('agent_name');
+            String conversationId = (String) data.get('conversation_id');
+            String analysisType = (String) data.get('analysis_type');
+            
+            String startedat = (String) data.get('started_at');
+            String timestamp = (String) data.get('timestamp');
+            String recordingurl = (String) data.get('recording_url');
+            String eventtype = (String) data.get('event_type');
+            String llmmode = (String) data.get('llm_mode');
+            String language = (String) data.get('language');
+            String endreason = (String) data.get('end_reason');
+                
+            // =========================
+            // 🔹 NORMALIZE PHONE
+            // =========================
+            phoneNumber = phoneNumber.replaceAll('[^0-9]', '');
+            if(phoneNumber.length() > 10){
+                phoneNumber = phoneNumber.substring(phoneNumber.length() - 10);
+            }
+
+            // =========================
+            // 🔹 (1) LEAD CHECK
+            // =========================
+            List<Lead> leadList = new List<Lead>();
+            if(phoneNumber != null || phoneNumber != ''){
+                leadList = [
+                    SELECT Id, Phone, MobilePhone  
+                    FROM Lead 
+                    WHERE (Phone = :phoneNumber OR MobilePhone = :phoneNumber)
+                    AND CreatedDate < :targetDate 
+                    LIMIT 1
+                ];
+            }
+            if(!leadList.isEmpty()){ // (1)
+                
+                Lead existingLead = leadList[0];
+                isLeadHandled = true;
+                /*updating lead details with data*/
+            
+                    
+                    existingLead.Business_Type__c = businesstype;
+                    existingLead.Call_Purpose__c = callpurpose;
+                    existingLead.Company_Name__c = companyname;
+                    existingLead.Composition__c = composition;
+                    
+                    existingLead.Market__c = market;
+                    existingLead.Order_Qty__c = orderquantity;
+                    existingLead.Qualification__c = qualification;
+                    existingLead.Sales_Product_Segment__c = salesproductsegment;
+                    existingLead.Whatsapp_Number__c = whatsapp;
+                    existingLead.Call_Summary__c = (callsummary != null ? callsummary : '');
+                    existingLead.Call_Dialer_Time__c = system.now();
+					update existingLead;
+
+                // ===== CREATE CALL DETAIL FOR LEAD =====
+                Call_Details__c callDetail1 = new Call_Details__c(
+                    Phone__c = phoneNumber,
+                    Call_summary__c = (callsummary != null ? callsummary : ''),
+                    Agent_id__c = agentid,
+                    Agent_name__c = agentname,
+                    
+                    Analysis_Type__c = analysisType,
+                    Started_at__c = startedat,
+                    Time_stamp__c = timestamp,
+                    Recording_url__c = recordingurl,
+                    
+                    Business_Type__c = businesstype,
+                    Call_Purpose__c = callpurpose,
+                    Company_Name__c = companyname,
+                    Composition__c = composition,
+                    Experience__c = experience,
+                    Market__c = market,
+                    Order_Quantity__c = orderquantity,
+                    Qualification__c = qualification,
+                    Conversation_id__c = conversationId,
+                    Sales_Product_Segment__c = salesproductsegment,
+                    User_Name__c = username,
+                    Whatsapp__c = whatsapp,
+                    Lead__c = existingLead.Id,
+                    Call_Status__c = (callstatus != null ? callstatus : ''),
+                    Call_Type__c = (direction != null ? direction : ''),
+                    Call_duration__c = callduration,
+                    Call_provider__c = callprovider,
+                    Call_sid__c = callsid,
+                    Call_source__c = callsource,
+                    Event_type__c = eventtype,
+                    llm_mode__c = llmmode,
+                    Language__c = language,
+                    End_reason__c = endreason
+                    
+                );
+                insert callDetail1;
+				system.debug('Call 1--:'+callDetail1);
+                // ===== TRANSCRIPT =====
+                List<Object> messages1 = (List<Object>) data.get('transcript');
+				system.debug('messages1 1--:'+messages1);
+                if(messages1 != null){ // (2)
+
+                    List<Transcript__c> lsttranscript = new List<Transcript__c>();
+
+                    for(Object message : messages1){
+
+                        Map<String, Object> msg = (Map<String, Object>) message;
+
+                        Transcript__c transcript = new Transcript__c();
+                        transcript.Call_Detail__c = callDetail1.Id;
+                        transcript.Role__c = (String)msg.get('speaker');
+                        transcript.Content__c = (String)msg.get('text');
+
+                        String ts = (String) msg.get('timestamp');
+                        if(ts != null){ // (3)
+                            ts = ts.replace('T',' ').replace('Z','');
+                            transcript.Date_and_Time__c = DateTime.valueOfGmt(ts);
+                        }
+
+                        lsttranscript.add(transcript);
+                    }
+
+                    if(!lsttranscript.isEmpty()){ // (4)
+                        insert lsttranscript;
+                    }
+                }
+            }
+
+            
+            
+            
+            
+            
+            
+            // =========================
+            // 🔹 (2) MAIN FLOW (NO LEAD)
+            // =========================
+            if((phoneNumber != null || phoneNumber != '') && isLeadHandled == false){ // (5)
+
+                Contact con;
+                Account acc;
+
+                // ===== CONTACT CHECK =====
+                List<Contact> conList = [
+                    SELECT Id, AccountId 
+                    FROM Contact 
+                    WHERE Phone LIKE :('%' + phoneNumber + '%') 
+                    LIMIT 1
+                ];
+
+                if(!conList.isEmpty()){ // (6)
+                    con = conList[0];
+                    acc = [SELECT Id FROM Account WHERE Id = :con.AccountId LIMIT 1];
+
+                } else {
+
+                    // ===== ACCOUNT CHECK =====
+                    List<Account> accList = [
+                        SELECT Id 
+                        FROM Account 
+                        WHERE Phone LIKE :('%' + phoneNumber + '%') 
+                        LIMIT 1
+                    ];
+
+                    if(!accList.isEmpty()){ // (7)
+
+                        acc = accList[0];
+
+                        List<Contact> accContacts = [
+                            SELECT Id, AccountId 
+                            FROM Contact 
+                            WHERE AccountId = :acc.Id 
+                            LIMIT 1
+                        ];
+
+                        if(!accContacts.isEmpty()){ // (8)
+                            con = accContacts[0];
+                        } else { // (9)
+                            con = new Contact(LastName='New Contact', Phone=phoneNumber, MobilePhone=phoneNumber, AccountId=acc.Id);
+                            insert con;
+                        }
+
+                    } else { // (10)
+
+                        acc = new Account(Name='New Account ' + phoneNumber, Phone=phoneNumber);
+                        insert acc;
+
+                        con = new Contact(LastName='New Contact', Phone=phoneNumber, MobilePhone=phoneNumber, AccountId=acc.Id);
+                        insert con;
+                    }
+                }
+
+                // =========================
+                // 🔹 OPPORTUNITY
+                // =========================
+                Opportunity opp;
+
+                List<Opportunity> oppList = [
+                    SELECT Id 
+                    FROM Opportunity 
+                    WHERE AccountId = :acc.Id 
+                    AND StageName NOT IN ('Closed Won', 'Closed Lost') 
+                    LIMIT 1
+                ];
+
+                if(!oppList.isEmpty()){ // (11)
+                    opp = oppList[0];
+                    opp.Call_source__c = callsource;
+                    opp.Business_Type__c = businesstype;
+                    opp.Call_Purpose__c = callpurpose;
+                    opp.Company_Name__c = companyname;
+                    opp.Composition__c = composition;
+                    opp.Experience__c = experience;
+                    opp.Market__c = market;
+                    opp.Order_Quantity__c = orderquantity;
+                    opp.Qualification__c = qualification;
+                    opp.Sales_Product_Segment__c = salesproductsegment;
+                    opp.User_Name__c = username;
+                    opp.Whatsapp__c = whatsapp;
+                    opp.Call_summary__c = (callsummary != null ? callsummary : '');
+                    opp.Last_Call_Date_Time__c = system.now();
+					update opp;
+                } else { // (12)
+
+                    opp = new Opportunity(
+                        Name = 'Opportunity - ' + phoneNumber,
+                        StageName = 'Prospecting',
+                        CloseDate = Date.today().addDays(7),
+                        AccountId = acc.Id,
+                        Contact__c = con.Id,
+                        Call_source__c = callsource,
+                        Business_Type__c = businesstype,
+                        Call_Purpose__c = callpurpose,
+                        Company_Name__c = companyname,
+                        Composition__c = composition,
+                        Experience__c = experience,
+                        Market__c = market,
+                        Order_Quantity__c = orderquantity,
+                        Qualification__c = qualification,
+                        Sales_Product_Segment__c = salesproductsegment,
+                        User_Name__c = username,
+                        Whatsapp__c = whatsapp,
+                        Call_summary__c = (callsummary != null ? callsummary : ''),
+                        Last_Call_Date_Time__c = system.now()
+                    );
+					 if(direction == 'inbound'){
+                        opp.Do_not_initiate_call__c = true;
+                    }else{
+                        opp.Do_not_initiate_call__c = false;
+                    }
+                    insert opp;
+                }
+
+                // =========================
+                // 🔹 CALL DETAIL
+                // =========================
+                Call_Details__c callDetail = new Call_Details__c(
+                    Phone__c = phoneNumber,
+                    Account__c = acc.Id,
+                    Contact__c = con.Id,
+                    Opportunity__c = opp.Id,
+                    Call_Status__c = (callstatus != null ? callstatus : ''),
+                    Call_summary__c = (callsummary != null ? callsummary : ''),
+                    Call_Type__c = (direction != null ? direction : ''),
+                    Agent_id__c = agentid,
+                    Agent_name__c = agentname,
+                    Analysis_Type__c = analysisType,
+                    Started_at__c = startedat,
+                    Time_stamp__c = timestamp,
+                    Recording_url__c = recordingurl,
+                    Business_Type__c = businesstype,
+                    Call_Purpose__c = callpurpose,
+                    Company_Name__c = companyname,
+                    Composition__c = composition,
+                    Experience__c = experience,
+                    Market__c = market,
+                    Order_Quantity__c = orderquantity,
+                    Qualification__c = qualification,
+                    Conversation_id__c = conversationId,
+                    Sales_Product_Segment__c = salesproductsegment,
+                    User_Name__c = username,
+                    Whatsapp__c = whatsapp,
+                    Call_duration__c = callduration,
+                    Call_provider__c = callprovider,
+                    Call_sid__c = callsid,
+                    Call_source__c = callsource,
+                    Event_type__c = eventtype,
+                    llm_mode__c = llmmode,
+                    Language__c = language,
+                    End_reason__c = endreason
+                );
+                insert callDetail;
+				system.debug('Call 2--:'+callDetail);
+                // =========================
+                // 🔹 TRANSCRIPT
+                // =========================
+                List<Object> messages = (List<Object>) data.get('transcript');
+				system.debug('messages 2--:'+messages);
+                if(messages != null){ // (13)
+
+                    List<Transcript__c> lsttranscript = new List<Transcript__c>();
+
+                    for(Object message : messages){
+
+                        Map<String, Object> msg = (Map<String, Object>) message;
+
+                        Transcript__c transcript = new Transcript__c();
+                        transcript.Call_Detail__c = callDetail.Id;
+                        transcript.Account__c = acc.Id;
+                        transcript.Contact__c = con.Id;
+                        transcript.Opportunity__c = opp.Id;
+						transcript.Role__c = (String)msg.get('speaker');
+                        transcript.Content__c = (String)msg.get('text');
+
+                        String ts = (String) msg.get('timestamp');
+                        if(ts != null){ // (3)
+                            ts = ts.replace('T',' ').replace('Z','');
+                            transcript.Date_and_Time__c = DateTime.valueOfGmt(ts);
+                        }
+                        lsttranscript.add(transcript);
+                    }
+
+                    if(!lsttranscript.isEmpty()){ // (14)
+                        insert lsttranscript;
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            System.debug('Error: ' + e.getMessage());
+            System.debug('Error line no: ' + e.getLineNumber());
+        }
+    }
+}

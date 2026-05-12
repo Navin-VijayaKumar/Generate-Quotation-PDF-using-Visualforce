@@ -10,9 +10,7 @@ global without sharing class EdesyWebhookHandler {
         System.debug('Webhook Payload: ' + requestBody);
         
         try {
-            // =========================
-            // 🔹 PARSE REQUEST
-            // =========================
+       
             Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(requestBody);
             
             Boolean isLeadHandled = false;
@@ -57,10 +55,7 @@ global without sharing class EdesyWebhookHandler {
             String llmmode = (String) data.get('llm_mode');
             String language = (String) data.get('language');
             String endreason = (String) data.get('end_reason');
-                
-            // =========================
-            // 🔹 NORMALIZE PHONE
-            // =========================
+           
             phoneNumber = phoneNumber.replaceAll('[^0-9]', '');
             if(phoneNumber.length() > 10){
                 phoneNumber = phoneNumber.substring(phoneNumber.length() - 10);

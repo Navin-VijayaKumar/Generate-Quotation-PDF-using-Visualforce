@@ -1,0 +1,529 @@
+public class BookingWhatsapp {
+    @AuraEnabled(cacheable=true)
+    public static DateTime dateSend(String recordId){ 
+        WhatsApp_Text__c whatsAppChats = [SELECT Id, Name, CreatedDate, Message_Type__c, Owner.Name, (SELECT Id, ContentDocumentId, LinkedEntityId, ContentDocument.Title FROM ContentDocumentLinks) 
+                                          FROM WhatsApp_Text__c where Id =: recordId];
+        return whatsAppChats.CreatedDate;
+    }
+    
+    @AuraEnabled(cacheable=true)
+    public static list<Whatsapp_Templates__c> tempwap(String recordId){ 
+        Booking__c book = [Select id, Sold_Rented_Date__c , name,Account__c, Account__r.firstname, Account__r.lastName, Unit__c, Unit__r.Name, Project__c, Project__r.Name,
+                           Blocking_Date__c,Release_date__c,Booking_Amount_New__c, Booking_Date__c,Mode_Of_Payment__c,Booking_Amount__c,
+                           Cancel_Date__c, Cancellation_Reason__c, Installment_Scheme__r.Name from Booking__c WHere Id =: recordId];
+        User u=[Select id,Name, MobilePhone from user where id=:userInfo.GetUserId()];
+        list<Whatsapp_Templates__c> temp=New  list<Whatsapp_Templates__c> ();
+        temp=[select id,name,Text__c, Related_Object__c from Whatsapp_Templates__c where Related_Object__c = 'Booking__c'];
+        list<Whatsapp_Templates__c> ggt = New  list<Whatsapp_Templates__c> ();
+        
+        string mobilephone='';
+        string firstname = '';
+        String  lastname = '';
+        string unitname = '';
+        String projectname = '';
+        String blockingdate = '';
+        String realsedate = '';
+        String bookindamount = '';
+        String bookidate = '';
+        String soldDate = '';
+        String cancelDate = '';
+        String modepayment = '';
+        String totalamount = '';
+        String cancelreason = '';
+        String install = '';
+        if(book.Account__c != null){
+            if(book.Account__r.firstName != null )firstname = book.Account__r.FirstName;
+            if(book.Account__r.LastName != null )lastname = book.Account__r.LastName;
+        }
+        if(book.Unit__c != null){
+            if(book.Unit__r.Name != null) unitname = book.Unit__r.Name;
+        }
+        if(book.Project__c != null){
+            if(book.Project__r.Name != null) projectname = book.Project__r.Name;           
+        }
+        if(book.Blocking_Date__c != null)   blockingdate = DateTime.newInstance(book.Blocking_Date__c.year(), book.Blocking_Date__c.month(), book.Blocking_Date__c.day()).format('dd-MM-yyyy');
+        if(book.Release_date__c != null) realsedate = DateTime.newInstance(book.Release_date__c.year(), book.Release_date__c.month(), book.Release_date__c.day()).format('dd-MM-yyyy');
+        // if(book.Booking_Amount_New__c != null) bookindamount = String.valueOf(book.Booking_Amount_New__c);
+        if(book.Booking_Date__c != null) bookidate = DateTime.newInstance(book.Booking_Date__c.year(), book.Booking_Date__c.month(), book.Booking_Date__c.day()).format('dd-MM-yyyy');
+        if(book.Mode_Of_Payment__c != null) modepayment = book.Mode_Of_Payment__c;
+        if(book.Cancellation_Reason__c != null) cancelreason = book.Cancellation_Reason__c;
+        if(book.Installment_Scheme__r.Name != null) install = book.Installment_Scheme__r.Name;
+        //  if(book.Booking_Amount__c != null)  totalamount = String.valueof(book.Booking_Amount__c);
+        if(u.MobilePhone !=null )mobilephone = u.Mobilephone;
+        if(book.Sold_Rented_Date__c  != null) soldDate = DateTime.newInstance(book.Sold_Rented_Date__c .year(), book.Sold_Rented_Date__c .month(), book.Sold_Rented_Date__c .day()).format('dd-MM-yyyy');
+        if(book.Cancel_Date__c  != null) cancelDate = DateTime.newInstance(book.Cancel_Date__c .year(), book.Cancel_Date__c .month(), book.Cancel_Date__c .day()).format('dd-MM-yyyy');
+        
+        
+        for(Whatsapp_Templates__c w: temp){
+            w.text__c = w.text__c.replace('{username}',u.Name);
+            w.text__c = w.text__c.replace('{usermobile}',mobilephone);
+            w.Text__c = w.Text__c.replace('firstName',firstname);
+            w.Text__c = w.Text__c.replace('LastName',lastname);
+            w.Text__c = w.Text__c.replace('unitName',unitname);
+            w.Text__c = w.Text__c.replace('projectname',projectname);
+            w.Text__c = w.Text__c.replace('blockingdate', blockingdate);
+            w.Text__c = w.Text__c.replace('relasedate',realsedate);
+            w.Text__c = w.Text__c.replace('BookingAmount', formatAsCurrency(book.Booking_Amount_New__c, '₹'));
+            w.Text__c = w.Text__c.replace('bookingdate',bookidate);
+            w.Text__c = w.Text__c.replace('modeofpayment',modepayment);
+            w.Text__c = w.Text__c.replace('solddate',soldDate);
+            w.Text__c = w.Text__c.replace('canceldate',cancelDate);
+            w.Text__c = w.Text__c.replace('cancelreason',cancelreason);
+            w.Text__c = w.Text__c.replace('install',install);
+            w.Text__c = w.Text__c.replace('totalamount',formatAsCurrency(book.Booking_Amount__c, '₹'));	
+            ggt.add(w);
+        }   
+        return ggt;
+    }
+    
+    public static String formatAsCurrency(Decimal amount, String currencySymbol) {
+        if (amount == null) {
+            return currencySymbol + '0.00';
+        }
+        
+        String formattedAmount = currencySymbol + amount.format();
+        if (!formattedAmount.contains('.')) {
+            // Append ".00" if no decimal part exists
+            formattedAmount += '.00';
+        }
+        
+        return formattedAmount;
+    }
+    
+    
+    @AuraEnabled(cacheable=true)
+    public static String getChats(String contactId){
+        try{
+            Booking__c  tk = [Select Id, Account__c from Booking__c  where Id =: contactId limit 1];
+            Account con = [SELECT Id , Whatsapp_Number__c, Name, FirstName, LastName FROM Account WHERE Id = : tk.Account__c];
+            
+            List<WhatsApp_Text__c> whatsAppChats = [SELECT Id , Message__c, CreatedDate, Message_Type__c, Owner.Name, (SELECT Id, ContentDocumentId, LinkedEntityId, ContentDocument.Title FROM ContentDocumentLinks) 
+                                                    FROM WhatsApp_Text__c
+                                                    WHERE Account__c = :con.Id AND Message_Type__c != null
+                                                    ORDER BY CreatedDate ASC];
+            
+            chatDetailWrapper chatdetails = new chatDetailWrapper();
+            chatdetails.shortName = con.FirstName != null ? con.FirstName.subString(0, 1) + con.LastName.subString(0, 1) : con.LastName.subString(0, 1);
+            List<chatWrapper> chats = new List<chatWrapper>();
+            
+            if (!whatsAppChats.isEmpty()){
+                chatdetails.startedcontactName = whatsAppChats[0].Message_Type__c == 'Outbound' ? 'Me' : con.Name;
+                chatdetails.endedcontactName = whatsAppChats[whatsAppChats.size() - 1].Message_Type__c == 'Outbound' ? 'Me' : con.Name;
+                chatdetails.startedDateTime = whatsAppChats[0].CreatedDate;
+                chatdetails.endedDateTime = whatsAppChats[whatsAppChats.size() - 1].CreatedDate;
+                
+                for (Whatsapp_Text__c chat : whatsAppChats){
+                    if (chat.ContentDocumentLinks != null && !chat.ContentDocumentLinks.isEmpty()) chats.add(new chatWrapper(chat, chat.ContentDocumentLinks, con.Name));
+                    else chats.add(new chatWrapper(chat, new list<ContentDocumentLink>(), con.Name));
+                }
+            }
+            chatdetails.chats = chats;
+            return JSON.serialize(chatdetails);
+        } catch (Exception e){
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+    
+    
+    @AuraEnabled
+    public static String sendMessage(String message, String contactId, Boolean customortemplate, String templateName, Boolean textinertornot){
+        try{
+            String phone = '';
+            string firstname = '';
+            String  lastname = '';
+            string unitname = 'N/A';
+            String projectname = 'N/A';
+            String bookindamount = 'N/A';
+            String bookidate = 'N/A';
+            String soldDate = 'N/A';
+            String cancelDate = 'N/A';
+            String modepayment = 'N/A';
+            String totalamount = 'N/A';
+            String cancelreason = 'N/A';
+            String install = 'N/A';
+            String blockingdate = 'N/A';
+            String realsedate = 'N/A';
+            Booking__c  book = [Select Id, Account__c,  Sold_Rented_Date__c , name, Account__r.firstname, Account__r.lastName, Unit__c, Unit__r.Name, Project__c, Project__r.Name,
+                                Blocking_Date__c,Release_date__c,Booking_Amount_New__c, Booking_Date__c,Mode_Of_Payment__c,Booking_Amount__c,
+                                Cancel_Date__c, Cancellation_Reason__c, Installment_Scheme__r.Name from Booking__c  where Id =: contactId limit 1];
+            Account con = [SELECT Id , PersonMobilePhone, Name, FirstName, LastName FROM Account WHERE Id = : book.Account__c];
+            if (con.PersonMobilePhone != null ){
+                phone = '91' + con.PersonMobilePhone;
+            }
+            if(book.Account__c != null){
+                if(book.Account__r.firstName != null )firstname = book.Account__r.FirstName;
+                if(book.Account__r.LastName != null )lastname = book.Account__r.LastName;
+            }
+            if(book.Unit__c != null){
+                if(book.Unit__r.Name != null) unitname = book.Unit__r.Name;
+            }
+            if(book.Project__c != null){
+                if(book.Project__r.Name != null) projectname = book.Project__r.Name;           
+            }
+            if(book.Blocking_Date__c != null)   blockingdate = DateTime.newInstance(book.Blocking_Date__c.year(), book.Blocking_Date__c.month(), book.Blocking_Date__c.day()).format('dd-MM-yyyy');
+            if(book.Release_date__c != null) realsedate = DateTime.newInstance(book.Release_date__c.year(), book.Release_date__c.month(), book.Release_date__c.day()).format('dd-MM-yyyy');
+            // if(book.Booking_Amount_New__c != null) bookindamount = String.valueOf(book.Booking_Amount_New__c);
+            if(book.Booking_Date__c != null) bookidate = DateTime.newInstance(book.Booking_Date__c.year(), book.Booking_Date__c.month(), book.Booking_Date__c.day()).format('dd-MM-yyyy');
+            if(book.Mode_Of_Payment__c != null) modepayment = book.Mode_Of_Payment__c;
+            if(book.Cancellation_Reason__c != null) cancelreason = book.Cancellation_Reason__c;
+            if(book.Installment_Scheme__r.Name != null) install = book.Installment_Scheme__r.Name;
+            if(book.Sold_Rented_Date__c  != null) soldDate = DateTime.newInstance(book.Sold_Rented_Date__c .year(), book.Sold_Rented_Date__c .month(), book.Sold_Rented_Date__c .day()).format('dd-MM-yyyy');
+            if(book.Cancel_Date__c  != null) cancelDate = DateTime.newInstance(book.Cancel_Date__c .year(), book.Cancel_Date__c .month(), book.Cancel_Date__c .day()).format('dd-MM-yyyy');
+            String fullname = firstname+ ' '+lastname;
+            String bokigamt =formatAsCurrency(book.Booking_Amount_New__c, '₹');
+            String apiFetch = system.label.AdsEraEndPoint;
+            String Whtaappoutbound = system.label.Adsera_Cloud_Account_Id;
+            String adseraAPIKey = system.label.AdsEraAPIKey;
+            String AdsEraSecretKey = system.label.AdsEraSecretKey;
+            String templateId = '';
+            
+            HttpRequest request = new HttpRequest();
+            
+            request.setEndpoint(apiFetch + '/api/pub/wa/send/template');
+            request.setMethod('POST');
+            request.setHeader('Content-Type', 'Application/json');
+            request.setHeader('x-api-key', adseraAPIKey);
+            request.setHeader('x-api-secret', AdsEraSecretKey);
+            
+            if(customortemplate == false){
+                //  system.debug('custom message is there');
+                templateId = system.label.whatsapp_window_custom_template;
+                // system.debug('Template id '+templateId);
+                Map<String, Object> body = new Map<String, Object>{
+                    'whatsapp' => Whtaappoutbound,
+                        'phone' => phone,
+                        'template' => templateId,
+                        'dynamicData' => new Map<String, Object>{
+                            'message' => message
+                                
+                                }
+                };
+                    request.setBody(JSON.serialize(body));
+                
+            }else{
+                if(templateName == 'Booked Confirmation Template'){
+                    //  system.debug('Bookd');
+                    templateId = system.label.booked_confirmation_template_vst2;
+                    Map<String, Object> body = new Map<String, Object>{
+                        'whatsapp' => Whtaappoutbound,
+                            'phone' => phone,
+                            'template' => templateId,
+                            'dynamicData' => new Map<String, Object>{
+                                'fullname' => fullname,
+                                    'unitname' => unitname,
+                                    'projectname' => projectname,
+                                    'bookingamount' => bokigamt,
+                                    'bookingdate' => blockingdate,
+                                    'modeofpayment' => modepayment,
+                                    'unitname1' => unitname,
+                                    'projectname1' => projectname
+                                    
+                                    }
+                    };
+                        request.setBody(JSON.serialize(body));
+                    
+                }else if(templateName == 'Sold / Rented Template'){
+                    //  system.debug('Sold');
+                    templateId = system.label.utility_soled_rented_vst2; 
+                    
+                    Map<String, Object> body = new Map<String, Object>{
+                        'whatsapp' => Whtaappoutbound,
+                            'phone' => phone,
+                            'template' => templateId,
+                            'dynamicData' => new Map<String, Object>{
+                                'fullname' => fullname,
+                                    'unitname' => unitname,
+                                    'projectname' => projectname,
+                                    'solddate' => soldDate,
+                                    'unitname1' => unitname,
+                                    'projectname1' => projectname,
+                                    'install' => install
+                                    }
+                    };
+                        request.setBody(JSON.serialize(body));
+                    
+                }else if(templateName == 'Notify for Cancellation'){
+                    //  system.debug('123');
+                    templateId = system.label.notify_for_cancellation_vst2;
+                    
+                    Map<String, Object> body = new Map<String, Object>{
+                        'whatsapp' => Whtaappoutbound,
+                            'phone' => phone,
+                            'template' => templateId,
+                            'dynamicData' => new Map<String, Object>{
+                                'fullname' => fullname,
+                                    'projectname' => projectname,
+                                    'unitname' => unitname,
+                                    'canceldate' => cancelDate,
+                                    'cancelreason' => cancelreason,
+                                    'install' => install
+                                    }
+                    };
+                        request.setBody(JSON.serialize(body));
+                    
+                }
+                
+            }
+            
+            HttpResponse response = new Http().send(request);
+            system.debug('Send '+response.getbody());
+            if (response.getStatusCode() == 200){
+                system.debug('get body as blob  '+response.getBodyasBlob());
+                Whatsapp_Text__c textRecord = new Whatsapp_Text__c();
+                textRecord.Account__c = con.Id;
+                textRecord.Message__c = message;
+                textRecord.Message_Type__c = 'Outbound';
+                textRecord.Msg_Sent__c = TRUE;
+                textRecord.Sent_By__c = userinfo.getUserId();
+                textRecord.Sent_To__c = phone;
+                if(textinertornot == False){
+                    //system.debug('textinertornot '+textinertornot);
+                    insert textRecord;
+                }
+            }
+            
+            return 'success';
+        } catch (Exception e){
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+    
+    @AuraEnabled
+    public static string UploadFiles(String FileContent, String FileName) {
+        try {
+            string cvid;
+            try{ContentVersion cv=[Select id , Title from ContentVersion where Title =:FileName limit 1];
+                cvid = cv.id;
+               }
+            catch(Exception e){
+                ContentVersion content = new ContentVersion(
+                    VersionData = EncodingUtil.base64Decode(FileContent),
+                    Title = FileName,
+                    PathOnClient = '/' + FileName
+                );
+                insert content;
+                cvid =content.ID;
+            }
+            
+            return cvid;
+        } catch (Exception e) {
+            System.debug('@@ Upload Files error message: ' + e.getMessage());
+            System.debug('@@ Upload Files error line number: ' + e.getLineNumber());
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+    
+    //This method is used when we send Attachments
+    @AuraEnabled
+    public static string sendMessageWithAttchments(String Message, String contactId, List<String> lstDocumentId, Boolean customortemplate, String templateName){
+        try {
+            
+            String Phone = '';
+            Booking__c  tk = [Select Id, Account__c from Booking__c  where Id =: contactId limit 1];
+            Account con = [SELECT Id , PersonMobilePhone, Name, FirstName, LastName FROM Account WHERE Id = : tk.Account__c];
+            if (con.PersonMobilePhone != null ){
+                Phone = '91' + con.PersonMobilePhone;
+            }
+            if(Message != null && Message.trim() != ''){
+                sendMessage(message,contactId,customortemplate,templateName, TRUE);
+            }    
+            
+            if(lstDocumentId.size() > 0) {
+                
+                for(String docId : lstDocumentId){
+                    
+                    // sendmessagemethod(templateToUse, phone, attachmentName, extraFileLink);
+                    System.enqueueJob(
+                        new WhatsAppAttachmentQueueable(phone, docId)
+                    );
+                    
+                }
+                List<ContentVersion> lstAttachments = [SELECT VersionData, FileType, Title, ContentSize, ContentDocumentId, PathOnClient, FirstPublishLocationId
+                                                       FROM ContentVersion WHERE Id IN: lstDocumentId];
+                
+                
+                
+                
+                Whatsapp_Text__c textRecord = new Whatsapp_Text__c(); 
+                textRecord.Account__c = tk.Account__c;
+                textRecord.Message_Type__c = 'Outbound';
+                textRecord.Message__c = message;
+                textRecord.Msg_Sent__c = true;
+                textRecord.Sent_To__c = con.PersonMobilePhone;
+                insert textRecord;
+                
+                List<ContentDocumentLink> lstNDocumentLink = new List<ContentDocumentLink> ();
+                for(ContentVersion item : lstAttachments) {
+                    ContentDocumentLink newDocumentLink = new ContentDocumentLink();
+                    newDocumentLink.LinkedEntityId = textRecord.Id;
+                    newDocumentLink.ContentDocumentId = item.ContentDocumentId;    
+                    lstNDocumentLink.add(newDocumentLink);
+                }
+                
+                
+                insert lstNDocumentLink;
+                ///insert cversionInsert;
+            }
+            return 'success';
+        } catch (Exception e){
+            system.debug('m '+e.getmessage());
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+    
+    
+    
+    @AuraEnabled
+    public static string SendTemplate(String TemplateId, String ContactId, String Message) {
+        try {
+            Whatsapp_Templates__c Template = [SELECT Id, Name, Text__c FROM Whatsapp_Templates__c WHERE Id =: TemplateId];
+            
+            List<ContentDocumentLink> lstDocumentLink = [SELECT Id, ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId =: TemplateId];
+            
+            Set<String> setContentDocumentId = new Set<String> ();
+            for(ContentDocumentLink item : lstDocumentLink) {
+                setContentDocumentId.add(item.ContentDocumentId);
+            }
+            
+            List<ContentVersion> lstAttachments = [SELECT VersionData, FileType, Title, ContentSize, ContentDocumentId, PathOnClient, FirstPublishLocationId
+                                                   FROM ContentVersion WHERE ContentDocumentId IN: setContentDocumentId];
+            
+            Message = Message == null ? Template.Text__c : Message;
+            
+            Booking__c  tk = [Select Id, Account__c from Booking__c  where Id =: contactId limit 1];
+            Account con = [SELECT Id , Whatsapp_Number__c, Name, FirstName, LastName FROM Account WHERE Id = : tk.Account__c];
+            if (con.Whatsapp_Number__c != null && con.Whatsapp_Number__c.length() == 10){
+                con.Whatsapp_Number__c = '91' + con.Whatsapp_Number__c;
+            }
+            
+            List<Map<String, Object>> lstMessages = new List<Map<String, Object>>();
+            
+            String EndPoint = '';
+            if(lstAttachments.size() > 0) {
+                EndPoint = System.label.whatsEra_Api_Endpoint + '/api/send/attach/doc';
+                Integer index = 1;
+                for(ContentVersion item : lstAttachments) {
+                    Map<String, Object> mapMessage = new Map<String, Object>();
+                    mapMessage.put('phone', con.Whatsapp_Number__c);
+                    mapMessage.put('contentType', '2');
+                    mapMessage.put('content', EncodingUtil.base64Encode(item.VersionData));
+                    if(index == 1) mapMessage.put('caption', Message);
+                    else mapMessage.put('caption', item.PathOnClient);
+                    mapMessage.put('fileName', item.PathOnClient);        
+                    lstMessages.add(mapMessage);
+                    index += 1;
+                }
+            } else {
+                EndPoint = System.label.whatsEra_Api_Endpoint+ '/api/send/text';
+                
+                Map<String, Object> mapMessage = new Map<String, Object>();
+                mapMessage.put('dst', con.Whatsapp_Number__c);
+                mapMessage.put('messageType', 0);
+                
+                Map<String, String> mapContent = new Map<String, String>();
+                mapContent.put('content', Message);
+                
+                mapMessage.put('textMessage', mapContent);
+                lstMessages.add(mapMessage);
+            } 
+            
+            String requestBody = JSON.serialize(lstMessages);
+            
+            HttpRequest request = new HttpRequest();
+            request.setEndpoint(System.label.whatsEra_Api_Endpoint+ '/api/send/text');
+            request.setMethod('POST');
+            request.setTimeout(120000);
+            request.setHeader('Content-Type', 'Application/json');
+            request.setBody(requestBody);
+            
+            Whatsapp_Text__c text = new Whatsapp_Text__c();
+            
+            list<ContentDocumentLink> conlink=New List<ContentDocumentLink>();
+            Attachment[] attachmentlist = new Attachment[]{};
+                for(ContentVersion item : lstAttachments) {
+                    ContentDocumentLink cdl2 = new ContentDocumentLink();
+                    cdl2.ContentDocumentId = item.ContentDocumentId;
+                    cdl2.LinkedEntityId = ContactId;
+                    cdl2.ShareType = 'V'; 
+                    cdl2.Visibility = 'AllUsers'; 
+                    conlink.add(cdl2);
+                    
+                    Attachment attachment = new Attachment();
+                    attachment.Name = item.PathonClient ;//System.label.AtachmentName+' '+contentVersion.PathonClient+'.'+contentVersion.FileType;
+                    //   attachment.Title = contentVersion.Title;
+                    attachment.Body = item.VersionData; 
+                    attachment.ParentId = text.Id; // Specify the Id of the record to attach the file to 
+                    attachmentlist.add(attachment);  
+                    
+                }
+            List<ContentDocumentLink> lstNDocumentLink = new List<ContentDocumentLink> ();
+            for(ContentDocumentLink item : lstDocumentLink) {
+                ContentDocumentLink newDocumentLink = new ContentDocumentLink();
+                newDocumentLink.LinkedEntityId = text.Id;
+                newDocumentLink.ContentDocumentId = item.ContentDocumentId;
+                
+                lstNDocumentLink.add(newDocumentLink);
+            }
+            
+            insert lstNDocumentLink;
+            if(attachmentlist.Size()>0)  insert attachmentlist;
+            if(conlink.Size()>0)  Database.SaveResult[] saveResults = Database.insert(conlink, false);
+            
+            return 'success';
+        } catch(Exception e) {
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+    
+    
+    @AuraEnabled
+    public static List<Whatsapp_Templates__c> getTemplates() {
+        try {
+            return [SELECT Id, Name, Text__c FROM Whatsapp_Templates__c ORDER BY Name];
+        } catch (Exception e) {
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+    
+    public class WhatsAppApiResponse{
+        public String status, responseMessage, id;
+        public Integer messageId;
+    }
+    
+    public class fileWrapper{
+        public String Title, link, Id;
+        public fileWrapper(ContentDocumentLink conDocList){
+            this.Title = conDocList.ContentDocument.Title;
+            this.link = '/' + conDocList.ContentDocumentId;
+            this.Id = conDocList.ContentDocumentId;
+        }
+    }
+    
+    public class chatDetailWrapper{
+        public String shortName, startedcontactName, endedcontactName;
+        public Datetime startedDateTime, endedDateTime;
+        public list<chatWrapper> chats = new list<chatWrapper>();
+    }
+    
+    public class chatWrapper{
+        public String message, createdBy, Id, name;
+        public Boolean inbound, mediaMsg = false;
+        public list<fileWrapper> files = new list<fileWrapper>();
+        public Datetime chatDateTime;
+        
+        public chatWrapper(Whatsapp_Text__c chat, list<ContentDocumentLink> conDocList, String accName){
+            this.message = chat.Message__c;
+            this.inbound = chat.Message_Type__c == 'Inbound' ? true : false;
+            this.Id = chat.Id;
+            this.chatDateTime = chat.CreatedDate;
+            this.createdBy = chat.Owner.Name;
+            this.name = accName;
+            if (conDocList.size() != 0){
+                this.mediaMsg = true;
+                for (ContentDocumentLink condoc : conDocList){
+                    this.files.add(new fileWrapper(condoc));
+                }
+            }
+        }
+    }
+}

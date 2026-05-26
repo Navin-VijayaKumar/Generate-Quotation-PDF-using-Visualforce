@@ -1,0 +1,718 @@
+/*Last Modified By: Kishore Sivakumar On: 10/02/2026 Description: Added logic for rolling up to related invoice and so line items
+* Last Modified By: Vaibhav Lolusare  On: 13/02/2026 Description: Updated logic to handle Scrap in Lot_Rejection_Decision__c field
+* Last Modified By: Rahul k 		  On: 17/02/2026 Description: Add rollupReturnQtyOnInvoiceItem method to rollup return qty on in items Create Return Qty Number
+* Last Modified By: Rahul k 		  On: 18/02/2026 Description: Add updateCreditNoteAmountOnInvoice method when status is set to IQC Verified the add the Total Amount on 
+																  Invoice Credit Note Amount 
+*/
+public class SaleReturnIQCDecesionHandler {
+    
+	// on this method when IQC Decesion is set to Line Rejection we cannot upadte IQC Decesion same way 
+	// Lot Rejection Decision is set to 'Scrap','Rework' we cannot upadte Lot Rejection Decision
+    public static void validateIQCDecision(List<Sales_Return_Item__c> newList,Map<Id, Sales_Return_Item__c> oldMap) {
+        
+        Set<String> lockedIQCValues = new Set<String>{
+            'Line Rejection'
+        };			
+        
+        Set<String> lockedLotRejectionValues = new Set<String>{
+            'Scrap',
+            'Rework'
+        };
+                    
+        for (Sales_Return_Item__c sri : newList) {
+            Sales_Return_Item__c oldSri = oldMap.get(sri.Id);
+            
+            // Lock IQC Decision if old value is one of the final decisions
+            if (
+                lockedIQCValues.contains(oldSri.IQC_Decesion__c) &&
+                oldSri.IQC_Decesion__c != sri.IQC_Decesion__c
+            ) {
+                sri.addError(
+                    'IQC Decision cannot be changed once it is finalized.'
+                );
+            }
+            
+            // Lock Lot Rejection Decision if old value is Scrap
+            if (
+                lockedLotRejectionValues.contains(oldSri.Lot_Rejection_Decision__c) &&
+                oldSri.Lot_Rejection_Decision__c != sri.Lot_Rejection_Decision__c
+            ) {
+                sri.addError(
+                    'Lot Rejection Decision cannot be changed once it is finalized to Scrap.'
+                );
+            }
+        }
+    }
+
+
+    public static void handleAfterUpdate(
+        List<Sales_Return_Item__c> newList,
+        Map<Id, Sales_Return_Item__c> oldMap,boolean isupdate
+    ) {
+
+        List<Sales_Return_Item__c> scrapItems  = new List<Sales_Return_Item__c>();
+        List<Sales_Return_Item__c> reworkItems = new List<Sales_Return_Item__c>();
+
+        for (Sales_Return_Item__c sri : newList) {
+            Sales_Return_Item__c oldSri;
+            
+            if (isupdate && oldMap != null && oldMap.containsKey(sri.Id)) {
+            	oldSri = oldMap.get(sri.Id);
+        	}
+
+            Boolean decisionChanged = false;
+            Boolean decisionChangedToRework = false;
+            if (isupdate) {
+                // Check if IQC Decision changed
+                if (oldSri != null &&
+                    sri.IQC_Decesion__c != null &&
+                    sri.IQC_Decesion__c != oldSri.IQC_Decesion__c) {
+                        decisionChanged = true;
+                }
+                
+                // Check if Lot Rejection Decision changed to Scrap
+                if (oldSri != null &&
+                    sri.Lot_Rejection_Decision__c == 'Scrap' &&
+                    sri.Lot_Rejection_Decision__c != oldSri.Lot_Rejection_Decision__c) {
+                        decisionChanged = true;
+                }
+                if (oldSri != null &&
+                    sri.Lot_Rejection_Decision__c == 'Rework' &&
+                    sri.Lot_Rejection_Decision__c != oldSri.Lot_Rejection_Decision__c) {
+                        decisionChangedToRework = true;
+                }
+                
+            } else {
+                // insert case
+                if (sri.IQC_Decesion__c != null || sri.Lot_Rejection_Decision__c == 'Scrap') {
+                    decisionChanged = true;
+                }
+            }
+            
+            if (decisionChanged) {
+                // Check for Line Rejection OR Scrap (now in Lot_Rejection_Decision__c)
+                if (sri.IQC_Decesion__c == 'Line Rejection' ||
+                    sri.Lot_Rejection_Decision__c == 'Scrap') {
+                        scrapItems.add(sri);      
+                }
+            }
+            
+            if(decisionChangedToRework){
+                if (sri.Lot_Rejection_Decision__c == 'Rework') {
+                    reworkItems.add(sri);
+                }
+            }
+
+        }
+
+        if (!scrapItems.isEmpty()) {
+            processScrapOrRejection(scrapItems);
+        }
+
+        if (!reworkItems.isEmpty()) {
+            processReworkToWIP(reworkItems);
+        }
+    }
+    
+    // =====================================================
+    // SCRAP → FG INVENTORY HISTORY (CORRECT DIRECTION)
+    // =====================================================
+
+    private static void processScrapOrRejection(
+        List<Sales_Return_Item__c> srItems
+    ) {
+
+        Set<Id> fgIds  = new Set<Id>();
+        Set<Id> csrIds = new Set<Id>();
+
+        for (Sales_Return_Item__c sri : srItems) {
+            fgIds.add(sri.Finished_Good__c);
+            csrIds.add(sri.Customer_Sales_Return__c);
+        }
+
+        Map<Id, Customer_Sales_Return__c> csrMap =
+            new Map<Id, Customer_Sales_Return__c>(
+                [SELECT Id, Ware_House__c
+                 FROM Customer_Sales_Return__c
+                 WHERE Id IN :csrIds]
+            );
+
+        Map<String, FG_Inventory__c> fgInventoryMap = new Map<String, FG_Inventory__c>();
+        for (FG_Inventory__c inv : [
+            SELECT Id, Finished_Good__c, Ware_House__c
+            FROM FG_Inventory__c
+            WHERE Finished_Good__c IN :fgIds
+        ]) {
+            fgInventoryMap.put(inv.Finished_Good__c + '-' + inv.Ware_House__c, inv);
+        }
+
+        List<FG_Inventory_History__c> historyList = new List<FG_Inventory_History__c>();
+
+        for (Sales_Return_Item__c sri : srItems) {
+
+            Customer_Sales_Return__c csr = csrMap.get(sri.Customer_Sales_Return__c);
+            if (csr == null) continue;
+
+            FG_Inventory__c fgInv =
+                fgInventoryMap.get(sri.Finished_Good__c + '-' + csr.Ware_House__c);
+            if (fgInv == null) continue;
+
+FG_Inventory_History__c hist = new FG_Inventory_History__c();
+
+hist.FG_Inventory__c           = fgInv.Id;
+hist.Lost_Qty__c               = sri.Return_Qty__c;
+
+hist.Customer_Sales_Return__c  = sri.Customer_Sales_Return__c;
+hist.Sale_Return_Item__c       = sri.Id;
+
+historyList.add(hist);
+        }
+
+        if (!historyList.isEmpty()) {
+            insert historyList;
+        }
+    }
+
+    // =====================================================
+    // REWORK → WIP INVENTORY HISTORY (CORRECT DIRECTION)
+    // =====================================================
+    private static void processReworkToWIP(
+        List<Sales_Return_Item__c> srItems
+    ) {
+
+        Set<Id> fgIds  = new Set<Id>();
+        Set<Id> csrIds = new Set<Id>();
+
+        for (Sales_Return_Item__c sri : srItems) {
+            fgIds.add(sri.Finished_Good__c);
+            csrIds.add(sri.Customer_Sales_Return__c);
+        }
+
+        // Warehouse
+        Map<Id, Customer_Sales_Return__c> csrMap =
+            new Map<Id, Customer_Sales_Return__c>(
+                [SELECT Id, Ware_House__c
+                 FROM Customer_Sales_Return__c
+                 WHERE Id IN :csrIds]
+            );
+
+        // BOM with Sub-Assembly (WIP)
+        List<BOM__c> bomList = [
+            SELECT Finished_Good__c, WIP__c, Quantity__c
+            FROM BOM__c
+            WHERE Finished_Good__c IN :fgIds
+            AND WIP__c != null
+        ];
+
+        // Collect WIP Ids
+        Set<Id> wipIds = new Set<Id>();
+        for (BOM__c bom : bomList) {
+            wipIds.add(bom.WIP__c);
+        }
+
+        // WIP Inventory (by Warehouse)
+        Map<String, WIP_Inventory__c> wipInventoryMap = new Map<String, WIP_Inventory__c>();
+        for (WIP_Inventory__c wipInv : [
+            SELECT Id, WIP__c, Ware_House__c
+            FROM WIP_Inventory__c
+            WHERE WIP__c IN :wipIds
+        ]) {
+            wipInventoryMap.put(
+                wipInv.WIP__c + '-' + wipInv.Ware_House__c,
+                wipInv
+            );
+        }
+
+        List<WIP_Inventory_History__c> historyList =
+            new List<WIP_Inventory_History__c>();
+
+        for (Sales_Return_Item__c sri : srItems) {
+
+            Customer_Sales_Return__c csr = csrMap.get(sri.Customer_Sales_Return__c);
+            if (csr == null) continue;
+
+            for (BOM__c bom : bomList) {
+
+                if (bom.Finished_Good__c != sri.Finished_Good__c) continue;
+
+                String key = bom.WIP__c + '-' + csr.Ware_House__c;
+                WIP_Inventory__c wipInv = wipInventoryMap.get(key);
+                if (wipInv == null) continue;
+
+                Decimal reworkQty = sri.Return_Qty__c * bom.Quantity__c;
+
+                WIP_Inventory_History__c hist =
+                    new WIP_Inventory_History__c();
+
+                hist.WIP_Inventory__c        = wipInv.Id;
+                hist.Rework_Qty__c           = reworkQty;
+                hist.Customer_Sales_Return__c = sri.Customer_Sales_Return__c;
+                hist.Sale_Return_Item__c    = sri.Id;
+
+                historyList.add(hist);
+            }
+        }
+
+        if (!historyList.isEmpty()) {
+            insert historyList;
+        }
+    }
+    
+    public static void handleAfter(List<Sales_Return_Item__c> newList, Map<Id, Sales_Return_Item__c> oldMap) {
+        system.debug('newList--:'+newList);
+        Map<Id, Decimal> invoiceDeltaMap = new Map<Id, Decimal>();
+        Map<Id, Decimal> soDeltaMap = new Map<Id, Decimal>();
+        
+        // Sets to collect all affected Invoice and SO Line Item IDs
+        Set<Id> affectedInvoiceLineIds = new Set<Id>();
+        Set<Id> affectedSOLineIds = new Set<Id>();
+
+        for (Sales_Return_Item__c sri : newList) {
+            if((sri.Status__c == 'IQC Verified' && sri.IQC_Decesion__c == 'Lot Rejection') || sri.Lost__c == true){
+            Sales_Return_Item__c oldRec = (oldMap != null) ? oldMap.get(sri.Id) : null;
+            
+            // Define quantity only if status is 'IQC Verified'
+            
+            Decimal oldQty = (oldRec != null && oldRec.Status__c == 'IQC Verified') ? (oldRec.Return_Qty__c != null ? oldRec.Return_Qty__c : 0) : 0;
+            Decimal newQty = ((sri.Status__c == 'IQC Verified' && sri.IQC_Decesion__c == 'Lot Rejection') || sri.Lost__c == true) ? (sri.Return_Qty__c != null ? sri.Return_Qty__c : 0) : 0;
+            system.debug(newQty+':-QTy--:'+oldQty);
+            // Calculate the difference: (New - Old)
+			Decimal delta = newQty - oldQty;
+            system.debug(':-delta--:'+delta);
+            if (delta != 0) {
+                if(sri.IQC_Decesion__c == 'Lot Rejection' || sri.Lost__c == true){
+                    // Map delta for Invoice Line Items
+                    if (sri.Invoice_Line_Item__c != null) {
+                        Decimal currentDelta = invoiceDeltaMap.containsKey(sri.Invoice_Line_Item__c) ? invoiceDeltaMap.get(sri.Invoice_Line_Item__c) : 0;
+                        invoiceDeltaMap.put(sri.Invoice_Line_Item__c, currentDelta + delta);
+                        system.debug('invoiceDeltaMap--:'+invoiceDeltaMap);
+                    }
+                    // Map delta for SO Line Items
+                    if (sri.SO_Line_Item__c != null) {
+                        Decimal currentDelta = soDeltaMap.containsKey(sri.SO_Line_Item__c) ? soDeltaMap.get(sri.SO_Line_Item__c) : 0;
+                        soDeltaMap.put(sri.SO_Line_Item__c, currentDelta + delta);
+                        system.debug('soDeltaMap--:'+soDeltaMap);
+                    }
+                }
+            }
+            
+            
+            // Collect affected Line Item IDs for complete rollup query
+            if (sri.Invoice_Line_Item__c != null) {
+                affectedInvoiceLineIds.add(sri.Invoice_Line_Item__c);
+            }
+            if (sri.SO_Line_Item__c != null) {
+                affectedSOLineIds.add(sri.SO_Line_Item__c);
+            }
+            }
+        }
+        
+        // 1. Query ALL Sales Return Items for affected Invoice Line Items and calculate complete rollup
+        if (!affectedInvoiceLineIds.isEmpty()) {
+            // Query all Sales Return Items with 'IQC Verified' status for affected Invoice Line Items
+            List<Sales_Return_Item__c> allInvoiceReturns = [
+                SELECT Id, Invoice_Line_Item__c, Sub_Total__c, Total_Amount__c, Status__c
+                FROM Sales_Return_Item__c
+                WHERE Invoice_Line_Item__c IN :affectedInvoiceLineIds AND Status__c = 'IQC Verified' AND IQC_Decesion__c = 'Lot Rejection'
+            ];
+            system.debug('allInvoiceReturns--:'+allInvoiceReturns.size());
+            // Build complete rollup maps from ALL related Sales Return Items
+            Map<Id, Decimal> completeInvoiceSubtotalMap = new Map<Id, Decimal>();
+            Map<Id, Decimal> completeInvoiceTotalMap = new Map<Id, Decimal>();
+            
+            for (Sales_Return_Item__c sri : allInvoiceReturns) {
+                Decimal currentSubtotal = completeInvoiceSubtotalMap.containsKey(sri.Invoice_Line_Item__c) ? 
+                                         completeInvoiceSubtotalMap.get(sri.Invoice_Line_Item__c) : 0;
+                Decimal currentTotal = completeInvoiceTotalMap.containsKey(sri.Invoice_Line_Item__c) ? 
+                                      completeInvoiceTotalMap.get(sri.Invoice_Line_Item__c) : 0;
+                
+                completeInvoiceSubtotalMap.put(sri.Invoice_Line_Item__c, 
+                    currentSubtotal + (sri.Sub_Total__c != null ? sri.Sub_Total__c : 0));
+                completeInvoiceTotalMap.put(sri.Invoice_Line_Item__c, 
+                    currentTotal + (sri.Total_Amount__c != null ? sri.Total_Amount__c : 0));
+            }
+            
+            // Update Invoice Line Items with complete rollup amounts
+            List<Invoice_Line_Item__c> invToUpdate = [
+                SELECT Id, Quantity__c, Customer_Return_Quantity__c, Create_Return_Qty_Number__c
+                FROM Invoice_Line_Item__c 
+                WHERE Id IN :invoiceDeltaMap.keySet()
+            ];
+            system.debug('invToUpdate--:'+invToUpdate);
+            for (Invoice_Line_Item__c ili : invToUpdate) {
+                Decimal delta = 0;
+                if(invoiceDeltaMap.get(ili.Id) != null){
+                	delta = invoiceDeltaMap.get(ili.Id);
+                }
+                // Add to the Return counter
+                ili.Customer_Return_Quantity__c = (ili.Customer_Return_Quantity__c == null ? 0 : ili.Customer_Return_Quantity__c) + delta;
+                
+                // Update with COMPLETE rollup amounts from all related Sales Return Items
+                if (completeInvoiceSubtotalMap.containsKey(ili.Id)) {
+                    ili.Sales_Return_Sub_Total__c = completeInvoiceSubtotalMap.get(ili.Id);
+                }
+                if (completeInvoiceTotalMap.containsKey(ili.Id)) {
+                    ili.Sales_Return_Total_Amount__c = completeInvoiceTotalMap.get(ili.Id);
+                }
+                
+                // SUBTRACT from the main Quantity
+                // If 5 items are returned (delta +5), the Invoice Quantity decreases by 5.
+                //ili.Quantity__c = (ili.Quantity__c == null ? 0 : ili.Quantity__c) - delta;
+            }
+            
+            
+            update invToUpdate;
+        }
+
+        // 2. Query ALL Sales Return Items for affected SO Line Items and calculate complete rollup
+        if (!affectedSOLineIds.isEmpty()) {
+            // Query all Sales Return Items with 'IQC Verified' status for affected SO Line Items
+            List<Sales_Return_Item__c> allSOReturns = [
+                SELECT Id, SO_Line_Item__c, Sub_Total__c, Total_Amount__c, Status__c
+                FROM Sales_Return_Item__c
+                WHERE SO_Line_Item__c IN :affectedSOLineIds 
+                AND Status__c = 'IQC Verified' AND IQC_Decesion__c = 'Lot Rejection'
+            ];
+            system.debug('allSOReturns--:'+allSOReturns.size());
+            // Build complete rollup maps from ALL related Sales Return Items
+            Map<Id, Decimal> completeSOSubtotalMap = new Map<Id, Decimal>();
+            Map<Id, Decimal> completeSOTotalMap = new Map<Id, Decimal>();
+            
+            for (Sales_Return_Item__c sri : allSOReturns) {
+                Decimal currentSubtotal = completeSOSubtotalMap.containsKey(sri.SO_Line_Item__c) ? 
+                                         completeSOSubtotalMap.get(sri.SO_Line_Item__c) : 0;
+                Decimal currentTotal = completeSOTotalMap.containsKey(sri.SO_Line_Item__c) ? 
+                                      completeSOTotalMap.get(sri.SO_Line_Item__c) : 0;
+                
+                completeSOSubtotalMap.put(sri.SO_Line_Item__c, 
+                    currentSubtotal + (sri.Sub_Total__c != null ? sri.Sub_Total__c : 0));
+                completeSOTotalMap.put(sri.SO_Line_Item__c, 
+                    currentTotal + (sri.Total_Amount__c != null ? sri.Total_Amount__c : 0));
+            }
+            
+            // Update SO Line Items with complete rollup amounts
+            List<SO_Line_Item__c> soToUpdate = [
+                SELECT Id, Customer_Return_Quantity__c 
+                FROM SO_Line_Item__c 
+                WHERE Id IN :soDeltaMap.keySet()
+            ];
+            
+            for (SO_Line_Item__c sol : soToUpdate) {
+                Decimal delta = soDeltaMap.get(sol.Id);
+                sol.Customer_Return_Quantity__c = (sol.Customer_Return_Quantity__c == null ? 0 : sol.Customer_Return_Quantity__c) + delta;
+                
+                // Update with COMPLETE rollup amounts from all related Sales Return Items
+                if (completeSOSubtotalMap.containsKey(sol.Id)) {
+                    sol.Sales_Return_Sub_Total__c = completeSOSubtotalMap.get(sol.Id);
+                }
+                if (completeSOTotalMap.containsKey(sol.Id)) {
+                    sol.Sales_Return_Total_Amount__c = completeSOTotalMap.get(sol.Id);
+                }
+            }
+            update soToUpdate;
+        }
+    }
+    
+    public static Boolean isRollupRunning = false;
+    
+    public static void rollupReturnQtyOnInvoiceItem(List<Sales_Return_Item__c> records) {
+        if(isRollupRunning){
+            return;
+        }
+        
+        isRollupRunning = true;
+        try{
+            Set<Id> invoiceLineIds = new Set<Id>();
+            
+            for (Sales_Return_Item__c sri : records) {
+                if (sri.Invoice_Line_Item__c != null) {
+                    invoiceLineIds.add(sri.Invoice_Line_Item__c);
+                }
+            }
+            
+            if (invoiceLineIds.isEmpty()) return;
+            
+            // Query ALL related Sales Return Items
+            List<Sales_Return_Item__c> allItems = [
+                SELECT Invoice_Line_Item__c, Return_Qty__c
+                FROM Sales_Return_Item__c
+                WHERE Invoice_Line_Item__c IN :invoiceLineIds
+            ];
+            
+            // Build rollup map
+            Map<Id, Decimal> rollupMap = new Map<Id, Decimal>();
+            
+            for (Sales_Return_Item__c sri : allItems) {
+                
+                Decimal current = rollupMap.containsKey(sri.Invoice_Line_Item__c)
+                    ? rollupMap.get(sri.Invoice_Line_Item__c)
+                    : 0;
+                
+                rollupMap.put(
+                    sri.Invoice_Line_Item__c,
+                    current + (sri.Return_Qty__c == null ? 0 : sri.Return_Qty__c)
+                );
+            }
+            
+            // Update Invoice Line Items
+            List<Invoice_Line_Item__c> updateList = new List<Invoice_Line_Item__c>();
+            
+            for (Id iliId : invoiceLineIds) {
+                
+                Invoice_Line_Item__c inv = new Invoice_Line_Item__c();
+                inv.Id = iliId;
+				inv.Create_Return_Qty_Number__c = rollupMap.containsKey(iliId) ? rollupMap.get(iliId) : 0;
+                if(inv.Create_Return_Qty_Number__c > 0){
+					updateList.add(inv);
+                }
+            }
+            
+            if (!updateList.isEmpty()) {
+                update updateList;
+            }
+        }finally{
+            isRollupRunning = false;
+        }
+    }
+    
+    public static Boolean isRunning = false;
+    
+    public static void updateCreditNoteAmountOnInvoice(List<Sales_Return_Item__c> newList,Map<Id, Sales_Return_Item__c> oldMap, Boolean isInsert, Boolean isUpdate, Boolean isDelete,
+        Boolean isUndelete)
+    {
+        if (SaleReturnIQCDecesionHandler.isRunning) {
+        	return;
+    	}
+
+    	SaleReturnIQCDecesionHandler.isRunning = true;
+        try{
+		system.debug('IN updateCreditNoteAmountOnInvoice');
+        Map<Id, Decimal> invoiceDeltaMap = new Map<Id, Decimal>();
+        Map<Id, Decimal> sriDeltaMap = new Map<Id, Decimal>();
+        set<Sales_Return_Item__c> stiSet = new set<Sales_Return_Item__c>();
+		// DELETE case → use oldMap
+        if (isDelete) {
+            for (Sales_Return_Item__c oldRec : oldMap.values()) {
+                if (oldRec.Invoice__c != null && oldRec.Status__c == 'IQC Verified') {
+                    Decimal amt = oldRec.Total_Amount__c == null ? 0 : oldRec.Total_Amount__c;
+                    invoiceDeltaMap.put(
+                        oldRec.Invoice__c,
+                        (invoiceDeltaMap.containsKey(oldRec.Invoice__c)
+                            ? invoiceDeltaMap.get(oldRec.Invoice__c)
+                            : 0) - amt   // subtract
+                    );
+                    sriDeltaMap.put(oldRec.Id, -amt);
+                }
+            }
+        }
+
+        // INSERT / UPDATE / UNDELETE
+        if (!isDelete) {
+			
+            for (Sales_Return_Item__c newRec : newList) {
+                if(newRec.Pending_Credit_Note_Amount__c > 0){
+                Sales_Return_Item__c oldRec =
+                    (isUpdate && oldMap != null) ? oldMap.get(newRec.Id) : null;
+                
+				if (isUpdate && oldRec != null && oldRec.Status__c == 'IQC Verified' && newRec.Status__c == 'WO Raised') {
+            		continue;
+        		}
+                
+                Decimal oldAmt = 0;
+                Decimal newAmt = 0;
+
+                if (oldRec != null && oldRec.Status__c == 'IQC Verified') {
+                    oldAmt = oldRec.Credit_Note_Amount__c == null ? 0 : oldRec.Credit_Note_Amount__c;
+                }
+
+                if (newRec.Status__c == 'IQC Verified') {
+                    newAmt = newRec.Pending_Credit_Note_Amount__c == null ? 0 : newRec.Pending_Credit_Note_Amount__c; 
+                }
+
+                Decimal delta = newAmt + oldAmt;
+				if (delta != 0 && newRec.Invoice_Line_Item__c != null) {
+                    invoiceDeltaMap.put(
+                        newRec.Invoice_Line_Item__c,
+                        (invoiceDeltaMap.containsKey(newRec.Invoice_Line_Item__c)
+                            ? invoiceDeltaMap.get(newRec.Invoice_Line_Item__c)
+                            : 0) + newAmt
+                    );
+                    sriDeltaMap.put(newRec.Id, oldAmt);
+                    stiSet.add(newRec);
+                }
+                /*if (delta != 0 && newRec.Invoice__c != null) {
+                    invoiceDeltaMap.put(
+                        newRec.Invoice__c,
+                        (invoiceDeltaMap.containsKey(newRec.Invoice__c)
+                            ? invoiceDeltaMap.get(newRec.Invoice__c)
+                            : 0) + newAmt
+                    );
+                    sriDeltaMap.put(newRec.Id, oldAmt);
+                }*/
+                }    
+            }
+        }
+		system.debug('invoiceDeltaMap size--'+invoiceDeltaMap.size());
+        
+		system.debug('stiSet size--'+stiSet.size());
+        if (invoiceDeltaMap.isEmpty()) return;
+
+        //List<Invoice__c> invoicesToUpdate = [SELECT Id, Credit_Note_Amount__c,Due_Amount__c FROM Invoice__c WHERE Id IN :invoiceDeltaMap.keySet()];
+		List<Invoice_Line_Item__c> invoicesToUpdate = [SELECT Id,Invoice__r.Due_Amount__c, Credit_Note_Amount__c FROM Invoice_Line_Item__c WHERE Id IN :invoiceDeltaMap.keySet()];
+        map<Id,Decimal> mapinvItemCNAmount = new map<Id,Decimal>();
+        for(Invoice_Line_Item__c iin : invoicesToUpdate){
+            mapinvItemCNAmount.put(iin.Id,(iin.Credit_Note_Amount__c != null ? iin.Credit_Note_Amount__c : 0));
+        }
+		List<Invoice_Line_Item__c> updateList = new List<Invoice_Line_Item__c>();
+		List<Sales_Return_Item__c> sriUpdates = new List<Sales_Return_Item__c>();
+        for (Sales_Return_Item__c inv : stiSet) {
+            system.debug('inv.Invoice_Line_Item__c--'+inv.Invoice_Line_Item__c);
+            system.debug('inv.Pending_Credit_Note_Amount__c--'+inv.Pending_Credit_Note_Amount__c);
+            if(inv.Invoice_Line_Item__c != null && inv.Pending_Credit_Note_Amount__c > 0){
+                Invoice_Line_Item__c invItem = new Invoice_Line_Item__c();
+                invItem.Id = inv.Invoice_Line_Item__c;
+                invItem.Credit_Note_Amount__c = inv.Pending_Credit_Note_Amount__c + mapinvItemCNAmount.get(inv.Invoice_Line_Item__c);
+                updateList.add(invItem);
+                
+                Sales_Return_Item__c sri = new Sales_Return_Item__c();
+                sri.Id = inv.Id;
+                sri.Credit_Note_Amount__c = (inv.Credit_Note_Amount__c != null ? inv.Credit_Note_Amount__c : 0) + inv.Pending_Credit_Note_Amount__c;
+				sriUpdates.add(sri);
+            }
+        }
+        system.debug('updateList size--'+updateList.size());
+        
+		system.debug('sriUpdates size--'+sriUpdates.size());
+
+        if (!updateList.isEmpty()) {
+            update updateList;
+        }
+        if (!sriUpdates.isEmpty()){
+	        update sriUpdates;
+        }
+         }catch(Exception e){
+            System.debug('updateCreditNoteAmountOnInvoice Error message--' + e.getMessage());
+            System.debug('Error line no--' + e.getLineNumber());
+        }
+	}
+
+   /* public static void updateCreditNoteAmountOnInvoice(List<Sales_Return_Item__c> newList,Map<Id, Sales_Return_Item__c> oldMap, Boolean isInsert, Boolean isUpdate, Boolean isDelete,
+        Boolean isUndelete)
+    {
+       	if (SaleReturnIQCDecesionHandler.isRunning) {
+        	return;
+    	}
+
+    	SaleReturnIQCDecesionHandler.isRunning = true;
+        try{
+        Map<Id, Decimal> invoiceDeltaMap = new Map<Id, Decimal>();
+        Map<Id, Decimal> sriDeltaMap = new Map<Id, Decimal>();
+		// DELETE case → use oldMap
+        if (isDelete) {
+            for (Sales_Return_Item__c oldRec : oldMap.values()) {
+                if (oldRec.Invoice__c != null && oldRec.Status__c == 'IQC Verified') {
+                    Decimal amt = oldRec.Total_Amount__c == null ? 0 : oldRec.Total_Amount__c;
+                    invoiceDeltaMap.put(
+                        oldRec.Invoice__c,
+                        (invoiceDeltaMap.containsKey(oldRec.Invoice__c)
+                            ? invoiceDeltaMap.get(oldRec.Invoice__c)
+                            : 0) - amt   // subtract
+                    );
+                   // sriDeltaMap.put(oldRec.Id, -amt);
+                }
+            }
+        }
+
+        // INSERT / UPDATE / UNDELETE
+        if (!isDelete) {
+			
+            for (Sales_Return_Item__c newRec : newList) {
+                if(newRec.Pending_Credit_Note_Amount__c > 0){
+                Sales_Return_Item__c oldRec =
+                    (isUpdate && oldMap != null) ? oldMap.get(newRec.Id) : null;
+                
+				if (isUpdate && oldRec != null && oldRec.Status__c == 'IQC Verified' && newRec.Status__c == 'WO Raised') {
+            		continue;
+        		}
+                
+                Decimal oldAmt = 0;
+                Decimal newAmt = 0;
+
+                if (oldRec != null && oldRec.Status__c == 'IQC Verified') {
+                    oldAmt = oldRec.Credit_Note_Amount__c == null ? 0 : oldRec.Credit_Note_Amount__c;
+                }
+
+                if (newRec.Status__c == 'IQC Verified') {
+                    newAmt = newRec.Pending_Credit_Note_Amount__c == null ? 0 : newRec.Pending_Credit_Note_Amount__c; 
+                }
+
+                Decimal delta = newAmt + oldAmt;
+
+                if (delta != 0 && newRec.Invoice__c != null) {
+                    invoiceDeltaMap.put(
+                        newRec.Invoice__c,
+                        (invoiceDeltaMap.containsKey(newRec.Invoice__c)
+                            ? invoiceDeltaMap.get(newRec.Invoice__c)
+                            : 0) + newAmt
+                    );
+                    sriDeltaMap.put(newRec.Id, oldAmt);
+                }
+                }    
+            }
+        }
+
+        if (invoiceDeltaMap.isEmpty()) return;
+
+        List<Invoice__c> invoicesToUpdate = [SELECT Id, Credit_Note_Amount__c,Due_Amount__c FROM Invoice__c WHERE Id IN :invoiceDeltaMap.keySet()];
+
+        List<Invoice__c> updateList = new List<Invoice__c>();
+		List<Sales_Return_Item__c> sriUpdates = new List<Sales_Return_Item__c>();
+        for (Invoice__c inv : invoicesToUpdate) {
+            if(inv.Due_Amount__c > 0){
+                
+                
+                Decimal existing = inv.Credit_Note_Amount__c == null ? 0 : inv.Credit_Note_Amount__c;       
+                Decimal delta = invoiceDeltaMap.get(inv.Id);
+                
+                Decimal finalAmount = 0;
+                if(inv.Due_Amount__c >= delta){
+            		finalAmount = delta;
+            	}else{
+                	finalAmount = inv.Due_Amount__c;
+            	}
+                inv.Credit_Note_Amount__c = existing + finalAmount;
+                
+                // Prevent negative value
+                if (inv.Credit_Note_Amount__c < 0) {
+                    inv.Credit_Note_Amount__c = 0;
+                }
+                
+                updateList.add(inv);
+                if(sriDeltaMap.keySet() != null){
+                    for (Id sriId : sriDeltaMap.keySet()) {
+                        Decimal sriDelta = sriDeltaMap.get(sriId);
+                        
+                        if (sriDelta != 0 || finalAmount > 0) {
+                            sriUpdates.add(new Sales_Return_Item__c(
+                                Id = sriId,
+                                Credit_Note_Amount__c = sriDelta + finalAmount
+                            ));
+                        }
+                    }
+                }    
+            }
+        }
+
+        if (!updateList.isEmpty()) {
+            update updateList;
+        }
+        if (!sriUpdates.isEmpty()){
+	        update sriUpdates;
+        }
+        }catch(Exception e){
+            System.debug('updateCreditNoteAmountOnInvoice Error message--' + e.getMessage());
+            System.debug('Error line no--' + e.getLineNumber());
+        }
+	}*/
+    
+}

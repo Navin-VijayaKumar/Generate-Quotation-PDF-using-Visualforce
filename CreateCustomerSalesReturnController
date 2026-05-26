@@ -1,0 +1,140 @@
+public with sharing class CreateCustomerSalesReturnController {
+
+    @AuraEnabled(cacheable=true)
+    public static String getInvoiceWithLineItems(String recordId) {
+        try {
+            Invoice__c inv = [
+                SELECT Id, Name, Account__c, Sales_Order__c, Ware_House__c,Contact__c,Opportunity__c,Freight_GST__c,Freight_Charges__c
+                FROM Invoice__c WHERE Id = :recordId LIMIT 1
+            ];
+
+            List<Invoice_Line_Item__c> invLines = [
+                SELECT Id, Name, Quantity__c, Remaining_Sales_Return_Quantity__c,Pending_Customer_Return_Created_Quantity__c,
+                        Finished_Good__c, Finished_Good__r.Name,Account__c, Opportunity_c__c,Sales_Order__c,FG_Inventory__c,
+                        Finished_Good__r.UOM__c, // UOM picklist from Finished Good
+                        SO_Line_Item__c,Create_Return_Qty_Number__c,Base_Price__c
+                FROM Invoice_Line_Item__c
+                WHERE Invoice__c = :recordId AND Pending_Customer_Return_Created_Quantity__c > 0
+                ORDER BY Name
+            ];
+
+            Customer_Sales_Return__c csr = new Customer_Sales_Return__c(
+                Invoice__c = inv.Id,
+                Account__c = inv.Account__c,
+                Sales_Order__c = inv.Sales_Order__c,
+                Ware_House__c = inv.Ware_House__c,
+                Return_Date__c = System.today(),
+                Contact__c = inv.Contact__c,
+                Opportunity__c = inv.Opportunity__c,
+                Freight_GST__c = inv.Freight_GST__c//,
+                //Freight_Charges__c = inv.Freight_Charges__c
+            );
+
+            List<ReturnLineItemWrapper> wrappers = new List<ReturnLineItemWrapper>();
+            Integer i = 1;
+            for (Invoice_Line_Item__c li : invLines) {
+                Sales_Return_Item__c sri = new Sales_Return_Item__c(
+                    Invoice_Line_Item__c = li.Id,
+                    Invoice__c = inv.Id,
+                    Finished_Good__c = li.Finished_Good__c,
+                    Account__c = li.Account__c,
+                    Opportunity_c__c = li.Opportunity_c__c,
+                    Sales_Order__c = li.Sales_Order__c,
+                    FG_Inventory__c = li.FG_Inventory__c,
+                    SO_Line_Item__c = li.SO_Line_Item__c, // Mapping SO Line Item
+                    UOM__c = li.Finished_Good__r.UOM__c,   // Mapping UOM Picklist
+                    Status__c = 'DB Raised',              // Requirement: Default Status
+                    Return_Qty__c = li.Pending_Customer_Return_Created_Quantity__c,
+                    Base_Price_Input__c = li.Base_Price__c
+                );
+
+                ReturnLineItemWrapper w = new ReturnLineItemWrapper(sri);
+                w.referenceId = i++;
+                w.actualInvoiceQty = li.Quantity__c;
+                w.remainingReturnQty = li.Pending_Customer_Return_Created_Quantity__c;
+                w.invItem = li.Name;
+                w.invItemUrl = '/' + li.Id;
+                w.productName = li.Finished_Good__r.Name;
+                w.productUrl = '/' + li.Finished_Good__c;
+                w.uomValue = li.Finished_Good__r.UOM__c; 
+                w.isOtherReason = false; 
+                w.doneQty = (li.Create_Return_Qty_Number__c != null ? li.Create_Return_Qty_Number__c : 0);
+                wrappers.add(w);
+            }
+
+            return JSON.serialize(new CustomerReturnMasterWrapper(csr, wrappers));
+        } catch (Exception e) {
+            system.debug('error on getInvoiceWithLineItems--'+e.getMessage());
+            system.debug('error line no--'+e.getLineNumber());
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+
+    @AuraEnabled
+    public static Id saveCustomerReturnWithLineItems(String customerReturnJSON, String returnItemsJSON) {
+        Savepoint sp = Database.setSavepoint();
+        try {
+            Customer_Sales_Return__c csr = (Customer_Sales_Return__c) JSON.deserialize(customerReturnJSON, Customer_Sales_Return__c.class);
+            insert csr;
+
+            List<ReturnLineItemWrapper> wraps = (List<ReturnLineItemWrapper>) JSON.deserialize(returnItemsJSON, List<ReturnLineItemWrapper>.class);
+            List<Sales_Return_Item__c> itemsToInsert = new List<Sales_Return_Item__c>();
+            
+            for (ReturnLineItemWrapper w : wraps) {
+                if (w.returnItem.Return_Qty__c != null && w.returnItem.Return_Qty__c > 0) {
+                    Sales_Return_Item__c sri = w.returnItem;
+                    sri.Customer_Sales_Return__c = csr.Id; 
+                    sri.Invoice__c = csr.Invoice__c; 
+                   /* if(sri.Non_Repairable_NR__c == true){
+                        sri.Status__c = 'IQC Verified';
+                        sri.IQC_Decesion__c = 'Line Rejection';
+                    }   */
+					if(sri.Non_Repairable_NR__c == true || sri.Lost__c == true){
+    sri.Status__c = 'IQC Verified';
+    sri.IQC_Decesion__c = 'Line Rejection';
+}
+                    itemsToInsert.add(sri);
+                }
+            }
+
+            if (!itemsToInsert.isEmpty()) {
+                insert itemsToInsert;
+                
+            } else {
+                throw new AuraHandledException('Please enter at least one Return Qty.');
+            }
+            
+
+            return csr.Id;
+        } catch (Exception e) {
+            Database.rollback(sp);
+            system.debug('error on saveCustomerReturnWithLineItems--'+e.getMessage());
+            system.debug('error line no--'+e.getLineNumber());
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+
+    public class CustomerReturnMasterWrapper {
+        @AuraEnabled public Customer_Sales_Return__c customerReturn;
+        @AuraEnabled public List<ReturnLineItemWrapper> returnItems;
+        public CustomerReturnMasterWrapper(Customer_Sales_Return__c cr, List<ReturnLineItemWrapper> ri) {
+            customerReturn = cr; returnItems = ri;
+        }
+    }
+
+    public class ReturnLineItemWrapper {
+        @AuraEnabled public Sales_Return_Item__c returnItem;
+        @AuraEnabled public String invItem;
+        @AuraEnabled public String invItemUrl;
+        @AuraEnabled public String productName;
+        @AuraEnabled public String productUrl;
+        @AuraEnabled public String uomValue;
+        @AuraEnabled public Integer referenceId;
+        @AuraEnabled public Decimal actualInvoiceQty;
+        @AuraEnabled public Decimal remainingReturnQty;
+        @AuraEnabled public Decimal doneQty;
+        @AuraEnabled public Boolean isOtherReason; 
+        public ReturnLineItemWrapper(Sales_Return_Item__c item) { returnItem = item; }
+    }
+
+}

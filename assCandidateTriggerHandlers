@@ -1,0 +1,875 @@
+//Modified by Aman Shrivastava
+//Date :- 26-05-2026
+//added future method on associate candidate fo whatsapp message.
+/***************************************************************************
+ * Modified By  - Navin
+ * Modified Date - 27/5/2026
+ * Changes      - Added HR Interview Scheduled WhatsApp notification
+ ***************************************************************************/
+public class assCandidateTriggerHandlers {
+
+    // ── recursion guard ─────────────────────────────────────
+    private static Boolean hasRun = false;
+
+    // =======================================================
+    // BEFORE DELETE
+    // =======================================================
+
+    public static void onBeforeDelete(List<Child__c> oldRecords) {
+
+        if (hasRun) return;
+        hasRun = true;
+
+        Set<Id> ids = new Map<Id, Child__c>(oldRecords).keySet();
+
+        // DeleteRecordsEmail d = new DeleteRecordsEmail();
+        // d.RecordsAssociate_Candidate(ids);
+    }
+
+    // =======================================================
+    // SEND NOTIFICATION
+    // =======================================================
+
+    public static void sendnotification(List<Child__c> childlist) {
+
+        Set<Id> childIds = new Set<Id>();
+
+        for (Child__c ch : childlist) {
+            childIds.add(ch.Id);
+        }
+
+        List<Child__c> childData = [
+
+            SELECT Id,
+                   Candidate__c,
+                   Candidate_Name__c,
+                   Candidate__r.Name,
+                   Candidate__r.Whats_App_Number__c,
+                   Candidate__r.MobilePhone,
+                   Candidate__r.Phone,
+                   Candidate__r.Dont_Send_Whatsapp__c
+
+            FROM Child__c
+            WHERE Id IN :childIds
+        ];
+
+        List<String> mobileList   = new List<String>();
+        List<String> recIds       = new List<String>();
+        List<String> contactNames = new List<String>();
+        List<String> contactIds   = new List<String>();
+
+        for (Child__c ch : childData) {
+
+            String preferredNumber = getPreferredNumber(ch);
+
+            if (String.isNotBlank(preferredNumber)) {
+
+                mobileList.add(preferredNumber);
+                recIds.add(ch.Id);
+                contactNames.add(ch.Candidate_Name__c);
+                contactIds.add(ch.Candidate__c);
+
+            } else {
+
+                System.debug(
+                    '⚠️ No valid phone number for Child__c Id: '
+                    + ch.Id
+                );
+            }
+        }
+
+        if (!mobileList.isEmpty()) {
+
+            sendTextMessageIntegration(
+                mobileList,
+                recIds,
+                contactNames,
+                contactIds
+            );
+
+        } else {
+
+            System.debug(
+                '⚠️ sendnotification: mobileList empty'
+            );
+        }
+    }
+
+    // =======================================================
+    // GET PREFERRED NUMBER
+    // =======================================================
+
+    private static String getPreferredNumber(Child__c ch) {
+
+        if (ch.Candidate__r == null) {
+            return null;
+        }
+
+        // WhatsApp Number
+        if (
+            !ch.Candidate__r.Dont_Send_Whatsapp__c &&
+            String.isNotBlank(ch.Candidate__r.Whats_App_Number__c)
+        ) {
+            return formatNumber(ch.Candidate__r.Whats_App_Number__c);
+        }
+
+        // Mobile
+        if (String.isNotBlank(ch.Candidate__r.MobilePhone)) {
+            return formatNumber(ch.Candidate__r.MobilePhone);
+        }
+
+        // Phone
+        if (String.isNotBlank(ch.Candidate__r.Phone)) {
+            return formatNumber(ch.Candidate__r.Phone);
+        }
+
+        return null;
+    }
+
+    // =======================================================
+    // FORMAT NUMBER
+    // ── same logic as whatsappMessengerForBatchStudent ──────
+    // Returns digits only with 91 prefix (no + sign)
+    // =======================================================
+
+    private static String formatNumber(String mobilenumber) {
+
+        if (String.isBlank(mobilenumber)) {
+            return null;
+        }
+
+        mobilenumber = mobilenumber.replaceAll('[^0-9]', '');
+
+        if (mobilenumber.length() == 10) {
+
+            mobilenumber = '91' + mobilenumber;
+
+        } else if (
+            mobilenumber.length() == 11 &&
+            mobilenumber.startsWith('0')
+        ) {
+
+            mobilenumber = '91' + mobilenumber.substring(1);
+
+        } else if (
+            mobilenumber.length() == 12 &&
+            mobilenumber.startsWith('91')
+        ) {
+
+            // already formatted
+
+        } else {
+
+            System.debug(
+                '⚠️ Invalid Number Format => '
+                + mobilenumber
+            );
+
+            return null;
+        }
+
+        return mobilenumber;
+    }
+    
+    // =======================================================
+    // SEND INTERVIEW SCHEDULED WHATSAPP NOTIFICATION
+    // Template  : interview_link_for_salesforce
+ 
+    // Variables : {{contactname}}, {{jobrole}}, {{intdate}}, {{inttime}}
+    // =======================================================
+
+  public static void sendInterviewScheduledNotification(List<Child__c> childList) {
+
+        Set<Id> childIds = new Set<Id>();
+        for (Child__c ch : childList) {
+            childIds.add(ch.Id);
+        }
+
+        List<Child__c> childData = [
+            SELECT Id,
+                   Candidate__c,
+                   Candidate_Name__c,
+                   Job_Profile__c,
+                   Interview_Date_Time__c,
+                   Candidate__r.Name,
+                   Candidate__r.Whats_App_Number__c,
+                   Candidate__r.MobilePhone,
+                   Candidate__r.Phone,
+                   Candidate__r.Dont_Send_Whatsapp__c
+            FROM Child__c
+            WHERE Id IN :childIds
+        ];
+          // Lists used for bulk async WhatsApp sending
+        List<String> mobileList    = new List<String>();
+        List<String> contactNames  = new List<String>();
+        List<String> jobRoles      = new List<String>();
+        List<String> intDates      = new List<String>();
+        List<String> intTimes      = new List<String>();
+        List<String> childIdList   = new List<String>();   
+        List<String> contactIdList = new List<String>();   
+
+        for (Child__c ch : childData) {
+
+            String preferredNumber = getPreferredNumber(ch);
+                  // Skip record if no valid number found
+            if (String.isBlank(preferredNumber)) {
+                System.debug(' No valid phone for Child__c Id: ' + ch.Id);
+                continue;
+            }
+              // Format interview date
+            String intDate = ch.Interview_Date_Time__c != null
+                ? ch.Interview_Date_Time__c.format('dd/MM/yyyy', 'Asia/Kolkata')
+                : '';
+             // Format interview time
+            String intTime = ch.Interview_Date_Time__c != null
+                ? ch.Interview_Date_Time__c.format('h.mm a', 'Asia/Kolkata').toLowerCase()
+                : '';
+               // Prepare data for bulk WhatsApp processing
+            mobileList.add(preferredNumber);
+            contactNames.add(
+                String.isNotBlank(ch.Candidate_Name__c) ? ch.Candidate_Name__c : 'Candidate'
+            );
+            jobRoles.add(
+                String.isNotBlank(ch.Job_Profile__c) ? ch.Job_Profile__c : 'Salesforce'
+            );
+            intDates.add(intDate);
+            intTimes.add(intTime);
+            childIdList.add(ch.Id);                        
+            contactIdList.add(ch.Candidate__c);           
+        }
+
+       /*
+     * Call async WhatsApp method
+     * to avoid governor limit issues
+     */
+        if (!mobileList.isEmpty()) {
+            sendInterviewWhatsAppAsync(
+                mobileList,
+                contactNames,
+                jobRoles,
+                intDates,
+                intTimes,
+                childIdList,   
+                contactIdList   
+            );
+        } else {
+            System.debug(' sendInterviewScheduledNotification: no valid numbers found');
+        }
+    }
+
+    // =======================================================
+    // FUTURE METHOD — Interview Scheduled WhatsApp
+    // =======================================================
+    
+@future(callout=true)
+    public static void sendInterviewWhatsAppAsync(
+        List<String> mobileList,
+        List<String> contactNames,
+        List<String> jobRoles,
+        List<String> intDates,
+        List<String> intTimes,
+        List<String> childIds,
+        List<String> contactIds
+    ) {
+        try {
+            String apiFetch        = System.Label.AdsEraEndPoint;
+            String adseraAPIKey    = System.Label.AdsEraAPIKey;
+            String adsEraSecretKey = System.Label.AdsEraSecretKey;
+            String whatsappId      = System.Label.AdseraAccountId;
+            String templateId      = System.Label.interview_link_for_salesforce;
+
+            List<WhatsappText__c> logsToInsert = new List<WhatsappText__c>();
+
+            for (Integer i = 0; i < mobileList.size(); i++) {
+                try {
+                    String mobileNumber = mobileList[i];
+                    String contactName  = contactNames[i];
+                    String jobRole      = jobRoles[i];
+                    String intDate      = intDates[i];
+                    String intTime      = intTimes[i];
+                    String childId      = childIds[i];
+                    String contactId    = contactIds[i];
+
+                    // ── Build message preview (what was sent) ──
+                    String messagePreview =
+                        'Dear ' + contactName + ',\n' +
+                        'Your online interview for Salesforce ' + jobRole +
+                        ' Role is scheduled on ' + intDate + ' at ' + intTime + '.\n' +
+                        'Please join from a laptop using the link.\n' +
+                        'The interview will last 60-75 minutes, keep your camera on.\n' +
+                        'Best Regards, Shreya Modi, HR Manager';
+
+                    // ── Build request body ──
+                    Map<String, Object> body = new Map<String, Object>{
+                        'whatsapp'    => whatsappId,
+                        'phone'       => mobileNumber,
+                        'template'    => templateId,
+                        'dynamicData' => new Map<String, Object>{
+                            'contactname' => contactName,
+                            'jobrole'     => jobRole,
+                            'intdate'     => intDate,
+                            'inttime'     => intTime
+                        }
+                    };
+
+                    String requestBody = JSON.serialize(body);
+
+                    HttpRequest req = new HttpRequest();
+                    req.setEndpoint(apiFetch + '/api/pub/wa/send/template');
+                    req.setMethod('POST');
+                    req.setHeader('Content-Type', 'application/json');
+                    req.setHeader('x-api-key',    adseraAPIKey);
+                    req.setHeader('x-api-secret', adsEraSecretKey);
+                    req.setBody(requestBody);
+                    req.setTimeout(120000);
+
+                    System.debug('=== Interview WhatsApp ===');
+                    System.debug('MOBILE        => ' + mobileNumber);
+                    System.debug('CONTACT NAME  => ' + contactName);
+                    System.debug('JOB ROLE      => ' + jobRole);
+                    System.debug('INT DATE      => ' + intDate);
+                    System.debug('INT TIME      => ' + intTime);
+                    System.debug('REQUEST BODY  => ' + requestBody);
+
+                    Http http         = new Http();
+                    HttpResponse res  = http.send(req);
+
+                    System.debug('STATUS CODE   => ' + res.getStatusCode());
+                    System.debug('RESPONSE BODY => ' + res.getBody());
+                    System.debug('=========================');
+
+                    // ── Parse message ID from response ──
+                    String messageId    = '';
+                    String deliveryStatus = res.getStatusCode() == 200 ? 'Sent' : 'Failed';
+
+                    try {
+                        Map<String, Object> responseMap =
+                            (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
+                        List<Object> msgs = (List<Object>) responseMap.get('messages');
+                        if (msgs != null && !msgs.isEmpty()) {
+                            messageId = String.valueOf(
+                                ((Map<String, Object>) msgs[0]).get('id')
+                            );
+                        }
+                    } catch (Exception parseEx) {
+                        System.debug('Could not parse messageId: ' + parseEx.getMessage());
+                    }
+
+                    // ── Build WhatsappText__c log record ──
+                    WhatsappText__c log = new WhatsappText__c(
+                        Sent_To__c        = mobileNumber,
+                        Text__c           = messagePreview,
+                        content__c        = requestBody,
+                        Message_Status__c = deliveryStatus,
+                        Delivery_Status__c= deliveryStatus,
+                        Message_Type__c   = 'Outbound',
+                        messageId__c      = messageId,
+                        senderName__c     = 'System',
+                        Ass_Can__c        = childId
+                    );
+
+                    // ── Link Contact if available ──
+                    if (String.isNotBlank(contactId)) {
+                        log.Contact__c = contactId;
+                    }
+
+                    logsToInsert.add(log);
+
+                } catch (Exception ex) {
+                    System.debug('INNER EXCEPTION => ' + ex.getMessage());
+                    System.debug(' LINE            => ' + ex.getLineNumber());
+                }
+            }
+
+            // ── Bulk insert all log records ──
+            if (!logsToInsert.isEmpty()) {
+                insert logsToInsert;
+                System.debug('WhatsappText__c records inserted: ' + logsToInsert.size());
+            }
+
+        } catch (Exception e) {
+            System.debug(' OUTER EXCEPTION => ' + e.getMessage());
+            System.debug(' LINE            => ' + e.getLineNumber());
+        }
+    }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    // =======================================================
+    // SEND SHREYA INTERVIEW ROUND WHATSAPP NOTIFICATION
+    // Template  : interview
+    // Condition : Status = "Shreya's Interview Round"
+    //             AND Interview_Date_Time__c != null
+    //             AND (Status changed OR Date changed)
+    // =======================================================
+
+    public static void sendShreyaInterviewNotification(List<Child__c> childList) {
+        // Store Child record IDs for SOQL query
+        Set<Id> childIds = new Set<Id>();
+        for (Child__c ch : childList) {
+            childIds.add(ch.Id);
+        }
+
+        List<Child__c> childData = [
+            SELECT Id,
+                   Candidate__c,
+                   Candidate_Name__c,
+                   Job_Profile__c,
+                   Interview_Date_Time__c,
+                   Candidate__r.Name,
+                   Candidate__r.Whats_App_Number__c,
+                   Candidate__r.MobilePhone,
+                   Candidate__r.Phone,
+                   Candidate__r.Dont_Send_Whatsapp__c
+            FROM Child__c
+            WHERE Id IN :childIds
+        ];
+         // Lists used for bulk async WhatsApp sending
+        List<String> mobileList    = new List<String>();
+        List<String> contactNames  = new List<String>();
+        List<String> jobRoles      = new List<String>();
+        List<String> intDates      = new List<String>();
+        List<String> intTimes      = new List<String>();
+        List<String> childIdList   = new List<String>();
+        List<String> contactIdList = new List<String>();
+
+        for (Child__c ch : childData) {
+
+            String preferredNumber = getPreferredNumber(ch);
+            // Skip if no valid mobile number found
+            if (String.isBlank(preferredNumber)) {
+                System.debug('[Shreya Round] No valid phone for Child__c Id: ' + ch.Id);
+                continue;
+            }
+            // Format interview date
+            String intDate = ch.Interview_Date_Time__c != null
+                ? ch.Interview_Date_Time__c.format('dd/MM/yyyy', 'Asia/Kolkata')
+                : '';
+             // Format interview time
+            String intTime = ch.Interview_Date_Time__c != null
+                ? ch.Interview_Date_Time__c.format('h.mm a', 'Asia/Kolkata').toLowerCase()
+                : '';
+
+            // Prepare bulk message data
+            mobileList.add(preferredNumber);
+            contactNames.add(
+                String.isNotBlank(ch.Candidate_Name__c) ? ch.Candidate_Name__c : 'Candidate'
+            );
+            jobRoles.add(
+                String.isNotBlank(ch.Job_Profile__c) ? ch.Job_Profile__c : 'Salesforce'
+            );
+            intDates.add(intDate);
+            intTimes.add(intTime);
+            childIdList.add(ch.Id);
+            contactIdList.add(ch.Candidate__c);
+        }
+        
+     /*
+     * Send WhatsApp messages asynchronously
+     * to avoid governor limit issues
+     */
+        if (!mobileList.isEmpty()) {
+            sendShreyaInterviewWhatsAppAsync(
+                mobileList,
+                contactNames,
+                jobRoles,
+                intDates,
+                intTimes,
+                childIdList,
+                contactIdList
+            );
+        } else {
+            System.debug(' sendShreyaInterviewNotification: no valid numbers found');
+        }
+    }
+
+    // =======================================================
+    // FUTURE METHOD — Shreya Interview Round WhatsApp
+    // =======================================================
+
+    @future(callout=true)
+    public static void sendShreyaInterviewWhatsAppAsync(
+        List<String> mobileList,
+        List<String> contactNames,
+        List<String> jobRoles,
+        List<String> intDates,
+        List<String> intTimes,
+        List<String> childIds,
+        List<String> contactIds
+    ) {
+        try {
+            String apiFetch        = System.Label.AdsEraEndPoint;
+            String adseraAPIKey    = System.Label.AdsEraAPIKey;
+            String adsEraSecretKey = System.Label.AdsEraSecretKey;
+            String whatsappId      = System.Label.AdseraAccountId;
+            String templateId      = System.Label.interview;
+
+            List<WhatsappText__c> logsToInsert = new List<WhatsappText__c>();
+
+            for (Integer i = 0; i < mobileList.size(); i++) {
+                try {
+                    String mobileNumber = mobileList[i];
+                    String contactName  = contactNames[i];
+                    String jobRole      = jobRoles[i];
+                    String intDate      = intDates[i];
+                    String intTime      = intTimes[i];
+                    String childId      = childIds[i];
+                    String contactId    = contactIds[i];
+
+                    // ── Message preview ──
+                    String messagePreview =
+                        'Dear ' + contactName + ',\n' +
+                        'Your interview for ' + jobRole +
+                        ' Role is scheduled on ' + intDate + ' at ' + intTime + '.\n' +
+                        'Best Regards, Shreya Modi, HR Manager';
+
+                    // ── Request body ──
+                    Map<String, Object> body = new Map<String, Object>{
+                        'whatsapp'    => whatsappId,
+                        'phone'       => mobileNumber,
+                        'template'    => templateId,
+                        'dynamicData' => new Map<String, Object>{
+                            'contactname' => contactName,
+                            'jobrole'     => jobRole,
+                            'intdate'     => intDate,
+                            'inttime'     => intTime
+                        }
+                    };
+
+                    String requestBody = JSON.serialize(body);
+
+                    HttpRequest req = new HttpRequest();
+                    req.setEndpoint(apiFetch + '/api/pub/wa/send/template');
+                    req.setMethod('POST');
+                    req.setHeader('Content-Type', 'application/json');
+                    req.setHeader('x-api-key',    adseraAPIKey);
+                    req.setHeader('x-api-secret', adsEraSecretKey);
+                    req.setBody(requestBody);
+                    req.setTimeout(120000);
+
+                    System.debug('=== Shreya Interview WhatsApp ===');
+                    System.debug('MOBILE        => ' + mobileNumber);
+                    System.debug('CONTACT NAME  => ' + contactName);
+                    System.debug('JOB ROLE      => ' + jobRole);
+                    System.debug('INT DATE      => ' + intDate);
+                    System.debug('INT TIME      => ' + intTime);
+                    System.debug('REQUEST BODY  => ' + requestBody);
+
+                    Http http        = new Http();
+                    HttpResponse res = http.send(req);
+
+                    System.debug('STATUS CODE   => ' + res.getStatusCode());
+                    System.debug('RESPONSE BODY => ' + res.getBody());
+                    System.debug('=================================');
+
+                    // ── Parse message ID ──
+                    String messageId      = '';
+                    String deliveryStatus = res.getStatusCode() == 200 ? 'Sent' : 'Failed';
+
+                    try {
+                        Map<String, Object> responseMap =
+                            (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
+                        List<Object> msgs = (List<Object>) responseMap.get('messages');
+                        if (msgs != null && !msgs.isEmpty()) {
+                            messageId = String.valueOf(
+                                ((Map<String, Object>) msgs[0]).get('id')
+                            );
+                        }
+                    } catch (Exception parseEx) {
+                        System.debug('Could not parse messageId: ' + parseEx.getMessage());
+                    }
+
+                    // ── Log to WhatsappText__c ──
+                    WhatsappText__c log = new WhatsappText__c(
+                        Sent_To__c         = mobileNumber,
+                        Text__c            = messagePreview,
+                        content__c         = requestBody,
+                        Message_Status__c  = deliveryStatus,
+                        Delivery_Status__c = deliveryStatus,
+                        Message_Type__c    = 'Outbound',
+                        messageId__c       = messageId,
+                        senderName__c      = 'System',
+                        Ass_Can__c         = childId
+                    );
+
+                    if (String.isNotBlank(contactId)) {
+                        log.Contact__c = contactId;
+                    }
+
+                    logsToInsert.add(log);
+
+                } catch (Exception ex) {
+                    System.debug(' INNER EXCEPTION => ' + ex.getMessage());
+                    System.debug(' LINE            => ' + ex.getLineNumber());
+                }
+            }
+
+            if (!logsToInsert.isEmpty()) {
+                insert logsToInsert;
+                System.debug(' [Shreya Round] WhatsappText__c records inserted: ' + logsToInsert.size());
+            }
+
+        } catch (Exception e) {
+            System.debug(' OUTER EXCEPTION => ' + e.getMessage());
+            System.debug(' LINE            => ' + e.getLineNumber());
+        }
+    }
+    
+    
+    
+    
+    
+    
+    // =======================================================
+    // FUTURE METHOD
+    // ── Uses AdseraAccountId (same as whatsappMessengerForBatchStudent)
+    // ── Uses Associate_Candidate_Link label for template ID
+    // =======================================================
+
+    @future(callout=true)
+    public static void sendTextMessageIntegration(
+
+        List<String> mobileList,
+        List<String> recIds,
+        List<String> contactNames,
+        List<String> contactIds
+
+    ) {
+
+        try {
+
+            // ==========================================
+            // CONFIG
+            // ── Mirrored from whatsappMessengerForBatchStudent
+            // ==========================================
+
+            String apiFetch        = System.Label.AdsEraEndPoint;       // https://app.adsera.in
+            String adseraAPIKey    = System.Label.AdsEraAPIKey;          // app_ffb6f4dabd2d647a
+            String AdsEraSecretKey = System.Label.AdsEraSecretKey;       // secret_24c09...
+
+            // ✅ Use AdseraAccountId (NOT Adsera_Cloud_Account_Id)
+            // AdseraAccountId = 69df9193e4b6792eacf6dffb
+            String whatsappId      = System.Label.AdseraAccountId;
+
+            // ✅ Template ID stored in Custom Label (same pattern as batch_start_date_notification)
+            // Associate_Candidate_Link = 696892c2e8b3089fbeaf9e50
+            String templateId      = System.Label.Associate_Candidate_Link;
+
+            // ==========================================
+            // LOOP
+            // ==========================================
+
+            for (Integer i = 0; i < mobileList.size(); i++) {
+
+                try {
+
+                    String mobileNumber = mobileList[i];
+                    String recid        = recIds[i];
+                    String contactname  = contactNames[i];
+
+                    // ==================================
+                    // FORMAT DATE
+                    // ==================================
+
+                    String todayDate = DateTime.now().format('dd-MM-yyyy');
+
+                    // ==================================
+                    // REQUEST
+                    // ==================================
+
+                    HttpRequest request = new HttpRequest();
+
+                    request.setEndpoint(
+                        apiFetch + '/api/pub/wa/send/template'
+                    );
+
+                    request.setMethod('POST');
+                    request.setHeader('Content-Type', 'application/json');
+                    request.setHeader('x-api-key',    adseraAPIKey);
+                    request.setHeader('x-api-secret', AdsEraSecretKey);
+                    request.setTimeout(120000);
+
+                    // ==================================
+                    // BODY
+                    // ── Same structure as whatsappMessengerForBatchStudent
+                    // ==================================
+
+                    Map<String, Object> body = new Map<String, Object>{
+                        'whatsapp'    => whatsappId,
+                        'phone'       => mobileNumber,
+                        'template'    => templateId,
+                        'dynamicData' => new Map<String, Object>{
+                            'contactname' => String.isBlank(contactname)
+                                             ? 'Candidate'
+                                             : contactname,
+                            'recordid'    => recid,
+                            'date'        => todayDate
+                        }
+                    };
+
+                    // ==================================
+                    // DEBUG
+                    // ==================================
+
+                    String requestBody = JSON.serialize(body);
+                    request.setBody(requestBody);
+
+                    System.debug('=================================');
+                    System.debug('ENDPOINT      => ' + request.getEndpoint());
+                    System.debug('WHATSAPP ID   => ' + whatsappId);
+                    System.debug('MOBILE        => ' + mobileNumber);
+                    System.debug('TEMPLATE ID   => ' + templateId);
+                    System.debug('CONTACT NAME  => ' + contactname);
+                    System.debug('DATE          => ' + todayDate);
+                    System.debug('REQUEST BODY  => ' + requestBody);
+
+                    // ==================================
+                    // SEND
+                    // ==================================
+
+                    Http http = new Http();
+                    HttpResponse response = http.send(request);
+
+                    // ==================================
+                    // RESPONSE DEBUG
+                    // ==================================
+
+                    System.debug('STATUS CODE      => ' + response.getStatusCode());
+                    System.debug('STATUS           => ' + response.getStatus());
+                    System.debug('RESPONSE BODY    => ' + response.getBody());
+                    System.debug('RESPONSE HEADERS => ' + response.getHeaderKeys());
+                    System.debug('=================================');
+
+                } catch (Exception ex) {
+
+                    System.debug('❌ INNER EXCEPTION => ' + ex.getMessage());
+                    System.debug('❌ LINE            => ' + ex.getLineNumber());
+                }
+            }
+
+        } catch (Exception e) {
+
+            System.debug('❌ OUTER EXCEPTION => ' + e.getMessage());
+            System.debug('❌ LINE            => ' + e.getLineNumber());
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+--------------------------
+/***************************************************************************
+ * Created By   - Chirag Singh
+ * Created Date - 26 May 2026
+ ***************************************************************************
+ * Modified By  - Navin
+ * Modified Date - 27/05/2026
+ * Changes      - Added HR Interview Scheduled WhatsApp notification
+ ***************************************************************************
+ * Modified By  - [Your Name]
+ * Modified Date - 27/05/2026
+ * Changes      - Added Shreya's Interview Round WhatsApp notification
+ ***************************************************************************/
+trigger assCandidateTrigger on Child__c (
+    after delete,
+    after insert,
+    after undelete,
+    after update,
+    before delete,
+    before insert,
+    before update
+) {
+    if (Trigger.isBefore) {
+
+        if (Trigger.isInsert) {
+        }
+
+        if (Trigger.isUpdate) {
+        }
+
+        if (Trigger.isDelete) {
+        }
+
+    } else {
+
+        // =========================================
+        // AFTER INSERT
+        // =========================================
+        if (Trigger.isInsert) {
+            assCandidateTriggerHandlers.sendnotification(
+                Trigger.new
+            );
+        }
+
+        // =========================================
+        // AFTER UPDATE
+        // =========================================
+        if (Trigger.isUpdate) {
+
+            List<Child__c> hrInterviewList      = new List<Child__c>();
+            List<Child__c> shreyaInterviewList  = new List<Child__c>();
+
+            for (Child__c newRec : Trigger.new) {
+                Child__c oldRec = Trigger.oldMap.get(newRec.Id);
+
+                // ── Task 1: HR Interview Scheduled ──────────────────
+                if (
+                    newRec.Status__c == 'HR Interview Scheduled' &&
+                    newRec.Interview_Date_Time__c != null &&
+                    newRec.Interview_Date_Time__c != oldRec.Interview_Date_Time__c
+                ) {
+                    hrInterviewList.add(newRec);
+                }
+
+                // ── Task 2: Shreya's Interview Round ────────────────
+                if (
+                    newRec.Status__c == 'Shreya\'s Interview Round' &&
+                    newRec.Interview_Date_Time__c != null &&
+                    (
+                        newRec.Status__c != oldRec.Status__c ||
+                        newRec.Interview_Date_Time__c != oldRec.Interview_Date_Time__c
+                    )
+                ) {
+                    shreyaInterviewList.add(newRec);
+                }
+            }
+
+            if (!hrInterviewList.isEmpty()) {
+                assCandidateTriggerHandlers.sendInterviewScheduledNotification(
+                    hrInterviewList
+                );
+            }
+
+            if (!shreyaInterviewList.isEmpty()) {
+                assCandidateTriggerHandlers.sendShreyaInterviewNotification(
+                    shreyaInterviewList
+                );
+            }
+        }
+
+        // =========================================
+        // AFTER DELETE
+        // =========================================
+        if (Trigger.isDelete) {
+            assCandidateSendEmailHandler.sendEmailOnDelete(
+                Trigger.old
+            );
+        }
+
+        if (Trigger.isUndelete) {
+        }
+    }
+}

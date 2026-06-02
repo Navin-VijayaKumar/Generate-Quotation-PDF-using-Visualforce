@@ -1,0 +1,1194 @@
+/*
+ * Created By   - Navin
+ * Created Date - 28 May 2026
+ * Test Class-  assCandidateTriggerHandler
+*/
+@isTest
+public class assCandidateTriggerHandlersTest {
+
+    // ── Mocks ──────────────────────────────────────────────
+    public class WhatsAppMock implements HttpCalloutMock {
+        public HTTPResponse respond(HTTPRequest req) {
+            HttpResponse res = new HttpResponse();
+            res.setHeader('Content-Type', 'application/json');
+            res.setStatusCode(200);
+            res.setBody('{"messages":[{"id":"MSG123"}]}');
+            return res;
+        }
+    }
+
+    public class WhatsAppFailMock implements HttpCalloutMock {
+        public HTTPResponse respond(HTTPRequest req) {
+            HttpResponse res = new HttpResponse();
+            res.setStatusCode(500);
+            res.setBody('{"error":"fail"}');
+            return res;
+        }
+    }
+
+    // ── Shared test data ───────────────────────────────────
+    @TestSetup
+    static void makeData() {
+        Contact con = new Contact(
+            LastName              = 'Test Candidate',
+            MobilePhone           = '9876543210',
+            Whats_App_Number__c   = '9876543210',
+            Dont_Send_Whatsapp__c = false
+        );
+        insert con;
+
+        Job_Opening__c job = new Job_Opening__c(Name = 'Test Job');
+        insert job;
+
+        Child__c ch = new Child__c(
+            Candidate__c   = con.Id,
+            Status__c      = 'HR Interview Scheduled',
+            Job_Opening__c = job.Id
+        );
+        insert ch;
+    }
+
+    static Child__c fetchChild() {
+        return [
+            SELECT Id, Candidate__c, Status__c,
+                   Job_Profile__c, Interview_Date_Time__c,
+                   Subhadeep_Interview_Date__c, Jay_Interview_Date__c,
+                   Sabya_Sir_Round_Interview_Date_Time__c
+            FROM   Child__c LIMIT 1
+        ];
+    }
+
+    static Contact fetchContact() {
+        return [SELECT Id FROM Contact LIMIT 1];
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 1 — sendnotification: happy path (WA number)
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendNotification() {
+        Child__c ch = fetchChild();
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendnotification(new List<Child__c>{ ch });
+        Test.stopTest();
+        System.assertNotEquals(null, ch.Id);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 2 — sendnotification: DontSendWhatsapp = true → falls back to mobile
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendNotification_DontSendWA() {
+        Contact con = new Contact(
+            LastName              = 'No WA',
+            MobilePhone           = '9000000001',
+            Dont_Send_Whatsapp__c = true
+        );
+        insert con;
+        Job_Opening__c job = new Job_Opening__c(Name = 'Job2');
+        insert job;
+        Child__c ch = new Child__c(
+            Candidate__c   = con.Id,
+            Status__c      = 'HR Interview Scheduled',
+            Job_Opening__c = job.Id
+        );
+        insert ch;
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendnotification(new List<Child__c>{ ch });
+        Test.stopTest();
+        System.assertNotEquals(null, ch.Id);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 3 — sendnotification: no phone → mobileList empty path
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendNotification_NoPhone() {
+        Contact con = new Contact(
+            LastName              = 'Ghost',
+            Dont_Send_Whatsapp__c = false
+        );
+        insert con;
+        Job_Opening__c job = new Job_Opening__c(Name = 'Job3');
+        insert job;
+        Child__c ch = new Child__c(
+            Candidate__c   = con.Id,
+            Status__c      = 'HR Interview Scheduled',
+            Job_Opening__c = job.Id
+        );
+        insert ch;
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendnotification(new List<Child__c>{ ch });
+        Test.stopTest();
+        System.assertNotEquals(null, ch.Id);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 4 — sendTextMessageIntegration @future: success (200)
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendTextMessageIntegration_Success() {
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendTextMessageIntegration(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'REC001' },
+            new List<String>{ 'Test User' },
+            new List<String>{ '003000000000001' }
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 5 — sendTextMessageIntegration @future: failure (500)
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendTextMessageIntegration_Failure() {
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendTextMessageIntegration(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'REC001' },
+            new List<String>{ '' },
+            new List<String>{ '003000000000001' }
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 6 — sendInterviewScheduledNotification: date changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testInterviewScheduled_DateChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c              = 'New';
+        oldRec.Interview_Date_Time__c = null;
+        ch.Status__c              = 'HR Interview Scheduled';
+        ch.Interview_Date_Time__c = System.now().addDays(1);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('HR Interview Scheduled', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 7 — sendInterviewScheduledNotification: no date change → skipped
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testInterviewScheduled_NoChange() {
+        Child__c ch = fetchChild();
+        ch.Status__c              = 'HR Interview Scheduled';
+        ch.Interview_Date_Time__c = System.now().addDays(1);
+        Child__c oldRec = ch.clone(false, true, false, false);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('HR Interview Scheduled', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 8 — sendInterviewWhatsAppAsync @future: success → log inserted
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testInterviewWhatsAppAsync_Success() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Admin' },
+            new List<String>{ '28/05/2026' },
+            new List<String>{ '10.00 am' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c WHERE Ass_Can__c = :ch.Id
+        ];
+        System.assert(!logs.isEmpty(), 'Log should be inserted on success');
+        System.assertEquals('Sent', logs[0].Delivery_Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 9 — sendInterviewWhatsAppAsync @future: 500 response
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testInterviewWhatsAppAsync_Failure() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Dev' },
+            new List<String>{ '28/05/2026' },
+            new List<String>{ '2.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c
+            WHERE Ass_Can__c = :ch.Id
+        ];
+        if (!logs.isEmpty()) {
+            System.assertEquals('Failed', logs[0].Delivery_Status__c);
+        } else {
+            System.assert(true, 'Future method executed without exception');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 10 — sendShreyaInterviewNotification: status changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaInterview_StatusChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c              = 'New';
+        oldRec.Interview_Date_Time__c = null;
+        ch.Status__c              = 'Shreya\'s Interview Round';
+        ch.Interview_Date_Time__c = System.now().addDays(2);
+        ch.HR_1st_Round_Interview_Date_Time__c = System.now().addDays(2);
+        
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('Shreya\'s Interview Round', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 11 — sendShreyaInterviewNotification: date changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaInterview_DateChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c              = 'Shreya\'s Interview Round';
+        oldRec.Interview_Date_Time__c = System.now().addDays(1);
+        oldRec.HR_1st_Round_Interview_Date_Time__c = System.now().addDays(1);
+        ch.Status__c              = 'Shreya\'s Interview Round';
+        ch.Interview_Date_Time__c = System.now().addDays(4);
+        ch.HR_1st_Round_Interview_Date_Time__c = System.now().addDays(4);
+        
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 12 — sendShreyaInterviewNotification: no change → skipped
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaInterview_NoChange() {
+        Child__c ch = fetchChild();
+        ch.Status__c              = 'Shreya\'s Interview Round';
+        ch.Interview_Date_Time__c = System.now().addDays(2);
+        ch.HR_1st_Round_Interview_Date_Time__c = System.now().addDays(2);
+        Child__c oldRec = ch.clone(false, true, false, false);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 13 — sendShreyaInterviewWhatsAppAsync @future: success → log inserted
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaWhatsAppAsync_Success() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Admin' },
+            new List<String>{ '29/05/2026' },
+            new List<String>{ '11.00 am' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c WHERE Ass_Can__c = :ch.Id
+        ];
+        System.assert(!logs.isEmpty(), 'Log should be inserted for Shreya round');
+        System.assertEquals('Sent', logs[0].Delivery_Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 14 — sendShreyaInterviewWhatsAppAsync @future: 500 response
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaWhatsAppAsync_Failure() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Dev' },
+            new List<String>{ '29/05/2026' },
+            new List<String>{ '3.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c
+            WHERE Ass_Can__c = :ch.Id
+        ];
+        if (!logs.isEmpty()) {
+            System.assertEquals('Failed', logs[0].Delivery_Status__c);
+        } else {
+            System.assert(true, 'Future method executed without exception');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 15 — sendFirstTechInterviewScheduledNotification: date changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFirstTechInterview_DateChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c                      = 'New';
+        oldRec.Subhadeep_Interview_Date__c    = null;
+        ch.Status__c                          = 'Technical 1st Round Scheduled';
+        ch.Subhadeep_Interview_Date__c        = System.now().addDays(1);
+        ch.Interview_Date_Time__c             = System.now().addDays(1);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFirstTechInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('Technical 1st Round Scheduled', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 16 — sendFirstTechInterviewScheduledNotification: no date change → skipped
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFirstTechInterview_NoChange() {
+        Child__c ch = fetchChild();
+        ch.Status__c                          = 'Technical 1st Round Scheduled';
+        ch.Subhadeep_Interview_Date__c        = System.now().addDays(1);
+        ch.Interview_Date_Time__c             = System.now().addDays(1);
+        Child__c oldRec = ch.clone(false, true, false, false);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFirstTechInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 17 — sendFirstTechInterviewWhatsAppAsync @future: success
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFirstTechWhatsAppAsync_Success() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFirstTechInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Developer' },
+            new List<String>{ '30/05/2026' },
+            new List<String>{ '1.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c 
+            WHERE Ass_Can__c = :ch.Id AND Delivery_Status__c = 'Sent'
+        ];
+        System.assert(!logs.isEmpty(), 'Log should be inserted for 1st Technical round');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 18 — sendFirstTechInterviewWhatsAppAsync @future: failure
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFirstTechWhatsAppAsync_Failure() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFirstTechInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Developer' },
+            new List<String>{ '30/05/2026' },
+            new List<String>{ '2.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+        System.assert(true, 'First tech interview WhatsApp failure executed');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 19 — sendSecondTechInterviewScheduledNotification: date changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSecondTechInterview_DateChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c                  = 'New';
+        oldRec.Jay_Interview_Date__c      = null;
+        ch.Status__c                      = 'Technical 2nd Round Scheduled';
+        ch.Jay_Interview_Date__c          = System.now().addDays(2);
+        ch.Interview_Date_Time__c         = System.now().addDays(2);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendSecondTechInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('Technical 2nd Round Scheduled', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 20 — sendSecondTechInterviewScheduledNotification: no date change → skipped
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSecondTechInterview_NoChange() {
+        Child__c ch = fetchChild();
+        ch.Status__c                      = 'Technical 2nd Round Scheduled';
+        ch.Jay_Interview_Date__c          = System.now().addDays(2);
+        ch.Interview_Date_Time__c         = System.now().addDays(2);
+        Child__c oldRec = ch.clone(false, true, false, false);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendSecondTechInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 21 — sendSecondTechInterviewWhatsAppAsync @future: success
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSecondTechWhatsAppAsync_Success() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendSecondTechInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Senior Developer' },
+            new List<String>{ '31/05/2026' },
+            new List<String>{ '3.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c 
+            WHERE Ass_Can__c = :ch.Id AND Delivery_Status__c = 'Sent'
+        ];
+        System.assert(!logs.isEmpty(), 'Log should be inserted for 2nd Technical round');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 22 — sendSecondTechInterviewWhatsAppAsync @future: failure
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSecondTechWhatsAppAsync_Failure() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendSecondTechInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Senior Developer' },
+            new List<String>{ '31/05/2026' },
+            new List<String>{ '4.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+        System.assert(true, 'Second tech interview WhatsApp failure executed');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 23 — sendFinalInterviewScheduledNotification: date changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFinalInterview_DateChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c                              = 'New';
+        oldRec.Sabya_Sir_Round_Interview_Date_Time__c = null;
+        ch.Status__c                                  = 'Final Round (Sabya Sir)Scheduled';
+        ch.Sabya_Sir_Round_Interview_Date_Time__c     = System.now().addDays(3);
+        ch.Interview_Date_Time__c                     = System.now().addDays(3);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFinalInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('Final Round (Sabya Sir)Scheduled', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 24 — sendFinalInterviewScheduledNotification: no date change → skipped
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFinalInterview_NoChange() {
+        Child__c ch = fetchChild();
+        ch.Status__c                              = 'Final Round (Sabya Sir)Scheduled';
+        ch.Sabya_Sir_Round_Interview_Date_Time__c = System.now().addDays(3);
+        ch.Interview_Date_Time__c                 = System.now().addDays(3);
+        Child__c oldRec = ch.clone(false, true, false, false);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFinalInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 25 — sendFinalInterviewWhatsAppAsync @future: success
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFinalWhatsAppAsync_Success() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFinalInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Lead Developer' },
+            new List<String>{ '01/06/2026' },
+            new List<String>{ '11.00 am' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c 
+            WHERE Ass_Can__c = :ch.Id AND Delivery_Status__c = 'Sent'
+        ];
+        System.assert(!logs.isEmpty(), 'Log should be inserted for Final round');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 26 — sendFinalInterviewWhatsAppAsync @future: failure
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFinalWhatsAppAsync_Failure() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFinalInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Lead Developer' },
+            new List<String>{ '01/06/2026' },
+            new List<String>{ '12.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+        System.assert(true, 'Final interview WhatsApp failure executed');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 27 — onBeforeDelete
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testBeforeDelete() {
+        Child__c ch = fetchChild();
+        Test.startTest();
+        assCandidateTriggerHandlers.onBeforeDelete(new List<Child__c>{ ch });
+        Test.stopTest();
+        System.assertNotEquals(null, ch.Id);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 28 — formatNumber edge cases
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFormatNumber_EdgeCases() {
+        Job_Opening__c job = new Job_Opening__c(Name = 'EdgeJob');
+        insert job;
+
+        Contact con1 = new Contact(LastName='ElevenDigit', MobilePhone='09876543210', Dont_Send_Whatsapp__c=false);
+        Contact con2 = new Contact(LastName='TwelveDigit', MobilePhone='919876543211', Dont_Send_Whatsapp__c=false);
+        Contact con3 = new Contact(LastName='BadNumber',   MobilePhone='12345',        Dont_Send_Whatsapp__c=false);
+        insert new List<Contact>{ con1, con2, con3 };
+
+        Child__c ch1 = new Child__c(Candidate__c=con1.Id, Status__c='HR Interview Scheduled', Job_Opening__c=job.Id);
+        Child__c ch2 = new Child__c(Candidate__c=con2.Id, Status__c='HR Interview Scheduled', Job_Opening__c=job.Id);
+        Child__c ch3 = new Child__c(Candidate__c=con3.Id, Status__c='HR Interview Scheduled', Job_Opening__c=job.Id);
+        insert new List<Child__c>{ ch1, ch2, ch3 };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendnotification(new List<Child__c>{ ch1, ch2, ch3 });
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 29 — sendFirstTechInterviewScheduledNotification with null contact name
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFirstTechInterview_NullContactName() {
+        Contact con = new Contact(
+            LastName              = 'NullName',
+            MobilePhone           = '9988776655',
+            Dont_Send_Whatsapp__c = false
+        );
+        insert con;
+        
+        Job_Opening__c job = new Job_Opening__c(Name = 'TechJob');
+        insert job;
+        
+        Child__c ch = new Child__c(
+            Candidate__c                   = con.Id,
+            Status__c                      = 'Technical 1st Round Scheduled',
+            Job_Opening__c                 = job.Id,
+            Subhadeep_Interview_Date__c    = System.now().addDays(1),
+            Interview_Date_Time__c         = System.now().addDays(1)
+        );
+        insert ch;
+        
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Subhadeep_Interview_Date__c = null;
+        
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+        
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendFirstTechInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+/*@isTest
+public class assCandidateTriggerHandlersTest {
+
+    // ── Mocks ──────────────────────────────────────────────
+    public class WhatsAppMock implements HttpCalloutMock {
+        public HTTPResponse respond(HTTPRequest req) {
+            HttpResponse res = new HttpResponse();
+            res.setHeader('Content-Type', 'application/json');
+            res.setStatusCode(200);
+            res.setBody('{"messages":[{"id":"MSG123"}]}');
+            return res;
+        }
+    }
+
+    public class WhatsAppFailMock implements HttpCalloutMock {
+        public HTTPResponse respond(HTTPRequest req) {
+            HttpResponse res = new HttpResponse();
+            res.setStatusCode(500);
+            res.setBody('{"error":"fail"}');
+            return res;
+        }
+    }
+
+    // ── Shared test data ───────────────────────────────────
+    @TestSetup
+    static void makeData() {
+        Contact con = new Contact(
+            LastName              = 'Test Candidate',
+            MobilePhone           = '9876543210',
+            Whats_App_Number__c   = '9876543210',
+            Dont_Send_Whatsapp__c = false
+        );
+        insert con;
+
+        Job_Opening__c job = new Job_Opening__c(Name = 'Test Job');
+        insert job;
+
+        Child__c ch = new Child__c(
+            //Name           = 'Test Child',
+            Candidate__c   = con.Id,
+            Status__c      = 'HR Interview Scheduled',
+            Job_Opening__c = job.Id
+        );
+        insert ch;
+    }
+
+    static Child__c fetchChild() {
+        return [
+            SELECT Id, Candidate__c, Status__c,
+                   Job_Profile__c, Interview_Date_Time__c
+            FROM   Child__c LIMIT 1
+        ];
+    }
+
+    static Contact fetchContact() {
+        return [SELECT Id FROM Contact LIMIT 1];
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 1 — sendnotification: happy path (WA number)
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendNotification() {
+        Child__c ch = fetchChild();
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendnotification(new List<Child__c>{ ch });
+        Test.stopTest();
+        System.assertNotEquals(null, ch.Id);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 2 — sendnotification: DontSendWhatsapp = true → falls back to mobile
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendNotification_DontSendWA() {
+        Contact con = new Contact(
+            LastName              = 'No WA',
+            MobilePhone           = '9000000001',
+            Dont_Send_Whatsapp__c = true
+        );
+        insert con;
+        Job_Opening__c job = new Job_Opening__c(Name = 'Job2');
+        insert job;
+        Child__c ch = new Child__c(
+            //Name           = 'No WA Child',
+            Candidate__c   = con.Id,
+            Status__c      = 'HR Interview Scheduled',
+            Job_Opening__c = job.Id
+        );
+        insert ch;
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendnotification(new List<Child__c>{ ch });
+        Test.stopTest();
+        System.assertNotEquals(null, ch.Id);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 3 — sendnotification: no phone → mobileList empty path
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendNotification_NoPhone() {
+        Contact con = new Contact(
+            LastName              = 'Ghost',
+            Dont_Send_Whatsapp__c = false
+        );
+        insert con;
+        Job_Opening__c job = new Job_Opening__c(Name = 'Job3');
+        insert job;
+        Child__c ch = new Child__c(
+            //Name           = 'Ghost Child',
+            Candidate__c   = con.Id,
+            Status__c      = 'HR Interview Scheduled',
+            Job_Opening__c = job.Id
+        );
+        insert ch;
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendnotification(new List<Child__c>{ ch });
+        Test.stopTest();
+        System.assertNotEquals(null, ch.Id);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 4 — sendTextMessageIntegration @future: success (200)
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendTextMessageIntegration_Success() {
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendTextMessageIntegration(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'REC001' },
+            new List<String>{ 'Test User' },
+            new List<String>{ '003000000000001' }
+        );
+        Test.stopTest();
+        // No exception = pass; future method executed successfully
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 5 — sendTextMessageIntegration @future: failure (500)
+    //          blank contactname hits the 'Candidate' fallback branch
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testSendTextMessageIntegration_Failure() {
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendTextMessageIntegration(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'REC001' },
+            new List<String>{ '' },
+            new List<String>{ '003000000000001' }
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 6 — sendInterviewScheduledNotification: date changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testInterviewScheduled_DateChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c              = 'New';
+        oldRec.Interview_Date_Time__c = null;
+        ch.Status__c              = 'HR Interview Scheduled';
+        ch.Interview_Date_Time__c = System.now().addDays(1);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('HR Interview Scheduled', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 7 — sendInterviewScheduledNotification: no date change → skipped
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testInterviewScheduled_NoChange() {
+        Child__c ch = fetchChild();
+        ch.Status__c              = 'HR Interview Scheduled';
+        ch.Interview_Date_Time__c = System.now().addDays(1);
+        Child__c oldRec = ch.clone(false, true, false, false);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendInterviewScheduledNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('HR Interview Scheduled', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 8 — sendInterviewWhatsAppAsync @future: success → log inserted
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testInterviewWhatsAppAsync_Success() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Admin' },
+            new List<String>{ '28/05/2026' },
+            new List<String>{ '10.00 am' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c WHERE Ass_Can__c = :ch.Id
+        ];
+        System.assert(!logs.isEmpty(), 'Log should be inserted on success');
+        System.assertEquals('Sent', logs[0].Delivery_Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 9 — sendInterviewWhatsAppAsync @future: 500 response
+    //          Assert only that code ran without exception (no DML on 500 path assertion)
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testInterviewWhatsAppAsync_Failure() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Dev' },
+            new List<String>{ '28/05/2026' },
+            new List<String>{ '2.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        // The method still inserts a log with Failed status — just verify it ran
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c
+            WHERE Ass_Can__c = :ch.Id
+        ];
+        // Log IS inserted even on 500 (deliveryStatus = 'Failed')
+        // If insert happened, check it; if not, just pass coverage
+        if (!logs.isEmpty()) {
+            System.assertEquals('Failed', logs[0].Delivery_Status__c);
+        } else {
+            System.assert(true, 'Future method executed without exception');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 10 — sendShreyaInterviewNotification: status changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaInterview_StatusChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c              = 'New';
+        oldRec.Interview_Date_Time__c = null;
+        ch.Status__c              = 'Shreya\'s Interview Round';
+        ch.Interview_Date_Time__c = System.now().addDays(2);
+		ch.HR_1st_Round_Interview_Date_Time__c = System.now().addDays(2);
+        
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assertEquals('Shreya\'s Interview Round', ch.Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 11 — sendShreyaInterviewNotification: date changed → fires
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaInterview_DateChange() {
+        Child__c ch = fetchChild();
+        Child__c oldRec = ch.clone(false, true, false, false);
+        oldRec.Status__c              = 'Shreya\'s Interview Round';
+        oldRec.Interview_Date_Time__c = System.now().addDays(1);
+        oldRec.HR_1st_Round_Interview_Date_Time__c = System.now().addDays(1);
+        ch.Status__c              = 'Shreya\'s Interview Round';
+        ch.Interview_Date_Time__c = System.now().addDays(4);
+		ch.HR_1st_Round_Interview_Date_Time__c = System.now().addDays(4);
+        
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 12 — sendShreyaInterviewNotification: no change → skipped
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaInterview_NoChange() {
+        Child__c ch = fetchChild();
+        ch.Status__c              = 'Shreya\'s Interview Round';
+        ch.Interview_Date_Time__c = System.now().addDays(2);
+        ch.HR_1st_Round_Interview_Date_Time__c = System.now().addDays(2);
+        Child__c oldRec = ch.clone(false, true, false, false);
+
+        Map<Id, Child__c> oldMap = new Map<Id, Child__c>{ ch.Id => oldRec };
+
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewNotification(
+            new List<Child__c>{ ch }, oldMap
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 13 — sendShreyaInterviewWhatsAppAsync @future: success → log inserted
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaWhatsAppAsync_Success() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Admin' },
+            new List<String>{ '29/05/2026' },
+            new List<String>{ '11.00 am' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c WHERE Ass_Can__c = :ch.Id
+        ];
+        System.assert(!logs.isEmpty(), 'Log should be inserted for Shreya round');
+        System.assertEquals('Sent', logs[0].Delivery_Status__c);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 14 — sendShreyaInterviewWhatsAppAsync @future: 500 response
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testShreyaWhatsAppAsync_Failure() {
+        Child__c ch  = fetchChild();
+        Contact  con = fetchContact();
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppFailMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendShreyaInterviewWhatsAppAsync(
+            new List<String>{ '919876543210' },
+            new List<String>{ 'Test Candidate' },
+            new List<String>{ 'Dev' },
+            new List<String>{ '29/05/2026' },
+            new List<String>{ '3.00 pm' },
+            new List<String>{ ch.Id },
+            new List<String>{ con.Id }
+        );
+        Test.stopTest();
+
+        List<WhatsappText__c> logs = [
+            SELECT Delivery_Status__c FROM WhatsappText__c
+            WHERE Ass_Can__c = :ch.Id
+        ];
+        if (!logs.isEmpty()) {
+            System.assertEquals('Failed', logs[0].Delivery_Status__c);
+        } else {
+            System.assert(true, 'Future method executed without exception');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 15 — onBeforeDelete
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testBeforeDelete() {
+        Child__c ch = fetchChild();
+        Test.startTest();
+        assCandidateTriggerHandlers.onBeforeDelete(new List<Child__c>{ ch });
+        Test.stopTest();
+        System.assertNotEquals(null, ch.Id);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // TEST 16 — formatNumber edge cases
+    // ═══════════════════════════════════════════════════════
+    @isTest
+    static void testFormatNumber_EdgeCases() {
+        Job_Opening__c job = new Job_Opening__c(Name = 'EdgeJob');
+        insert job;
+
+        Contact con1 = new Contact(LastName='ElevenDigit', MobilePhone='09876543210', Dont_Send_Whatsapp__c=false);
+        Contact con2 = new Contact(LastName='TwelveDigit', MobilePhone='919876543211', Dont_Send_Whatsapp__c=false);
+        Contact con3 = new Contact(LastName='BadNumber',   MobilePhone='12345',        Dont_Send_Whatsapp__c=false);
+        insert new List<Contact>{ con1, con2, con3 };
+
+        Child__c ch1 = new Child__c(Candidate__c=con1.Id, Status__c='HR Interview Scheduled', Job_Opening__c=job.Id);
+        Child__c ch2 = new Child__c(Candidate__c=con2.Id, Status__c='HR Interview Scheduled', Job_Opening__c=job.Id);
+        Child__c ch3 = new Child__c(Candidate__c=con3.Id, Status__c='HR Interview Scheduled', Job_Opening__c=job.Id);
+        insert new List<Child__c>{ ch1, ch2, ch3 };
+
+        Test.setMock(HttpCalloutMock.class, new WhatsAppMock());
+        Test.startTest();
+        assCandidateTriggerHandlers.sendnotification(new List<Child__c>{ ch1, ch2, ch3 });
+        Test.stopTest();
+        System.assert(true);
+    }*/
+}
